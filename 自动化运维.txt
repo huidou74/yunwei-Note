@@ -1,0 +1,860 @@
+自动化运维
+
+传统运维效率低，大多工作人为完成
+传统运维工作繁琐，容易出错
+传统运维每日重复做相同的事情
+传统运维没有标准化流程
+传统运维的脚本繁多，不能方便管理
+自动化运维就是要解决上面所有问题
+
+
+
+
+常见自动化运维工具
+
+1.Puppet （www.puppetlabs.com）基于rubby开发，c/s架构，支持多平台，可管理配置文件、用户、cron任务、软件包、系统服务等。 分为社区版（免费）和企业版（收费），企业版支持图形化配置。
+2.Saltstack（官网 https://saltstack.com,文档docs.saltstack.com ）
+基于python开发，c/s架构，支持多平台，比puppet轻量，在远程执行命令时非常快捷，配置和使用比puppet容易，能实现puppet几乎所有的功能。
+3. Ansible （www.ansible.com ）更加简洁的自动化运维工具，不需要在客户端上安装agent，基于python开发。可以实现批量操作系统配置、批量程序的部署、批量运行命令。
+
+
+
+saltstack安装
+1. saltstack介绍https://docs.saltstack.com/en/latest/topics/index.html
+2. 可以使用salt-ssh远程执行，类似ansible，
+3. 也支持c/s模式，下面我们将讲述该种模式的使用，需要准备两台机器
+4. 133.130为服务端，133.132为客户端
+5. 设置hostname以及hosts，01,02
+6. 两台机器全部安装saltstack yum源
+7.  yum  -y install https://repo.saltstack.com/yum/redhat/salt-repo-latest-2.el6.noarch.rpm
+8. 11上执行 yum install -y salt-master salt-minion
+9. 12上执行 yum install -y salt-minion
+
+#如果保存 记得清缓存  yum clean expire-cache -y
+
+
+
+
+
+启动salt相关服务
+
+
+ 11上编辑配置文件
+ vim /etc/salt/minion //增加
+ master: huidou04
+ 启动服务systemctl start salt-master; systemctl start salt-minion
+
+ 12上编辑配置文件
+ vim /etc/salt/minion //增加
+ master: huidou05
+ 启动服务systemctl start salt-minion
+
+ 服务端监听4505和4506两个端口，4505为消息发布的端口，4506为和客户端通信的端口
+
+
+
+
+
+
+
+
+saltstack配置认证
+
+
+1.master端和minion端通信需要建立一个安全通道，传输过程需要加密，所以得配置认证，也是通过密钥对来加密解密的
+2.minion在第一次启动时会在/etc/salt/pki/minion/下生成minion.pem和minion.pub，其中.pub为公钥，它会把公钥传输给master
+3. master第一次启动时也会在/etc/salt/pki/master下生成密钥对，当master接收到minion传过来的公钥后，通过salt-key工具接受这个公钥，一旦接受后就会在/etc/salt/pki/master/minions/目录里存放刚刚接受的公钥，同时客户端也会接受master传过去的公钥，把它放在/etc/salt/pki/minion目录下，并命名为minion_master.pub
+4. 以上过程需要借助salt-key工具来实现
+5. 执行如下命令 salt-key -a aming-01    // -a后面跟主机名，可以认证指定主机
+6. salt-key -a aming-02
+
+
+
+
+
+
+salt-key命令用法
+
+ -a  后面跟主机名，认证指定主机
+ -A  认证所有主机
+ -r  跟主机名，拒绝指定主机
+ -R  拒绝所有主机
+ -d  跟主机名，删除指定主机认证
+ -D  删除全部主机认证
+ -y  省略掉交互，相当于直接按了y
+
+
+
+
+
+
+
+
+saltstack远程执行命令
+ # 在master上执行
+ salt '*' test.ping //这里的*表示所有已经签名的minion端，也可以指定一个
+ salt 'aming-01' test.ping
+ salt '*' cmd.run "hostname"   #双引号里表示 你要操作的命令
+ 说明： 这里的*必须是在master上已经被接受过认证的客户端，可以通过salt-key查到，通常是我们已经设定的id值。关于这部分内容，它支持通配、列表以及正则。 比如两台客户端aming-01,aming-02, 那我们可以写成salt 'aming-*', salt 'aming-0[12]'  salt -L '01,02'   #list  列表 
+  salt -E 'huidou-(01|02)' # 正则
+  等形式，使用列表，即多个机器用逗号分隔，而且需要加-L，使用正则必须要带-E选项。
+  它还支持grains，
+    -G选项，pillar 加    -I选项，下面会介绍到。
+
+
+
+
+
+
+
+
+
+ saltstack - grains
+
+ grains是在minion启动时收集到的一些信息，比如操作系统类型、网卡ip、内核版本、cpu架构等。
+ salt 'huidou02' grains.ls 列出所有的grains项目名字
+ salt 'huidou02' grains.items 列出所有grains项目以及值
+ grains的信息并不是动态的，并不会实时变更，它是在minion启动时收集到的。
+ 我们可以根据grains收集到的一些信息，做配置管理工作。
+ grains支持自定义信息。
+
+
+saltstack – 自定义grains
+   #自定义信息
+ minion上：
+ vim /etc/salt/grains  //添加：
+ role: nginx 
+ env: test      #冒号后面需要加空格 
+ 重启minion服务
+ systemctl restart salt-minion    //  service salt-minion restart
+ master上：
+ 获取grains：
+ salt '*' grains.item role env
+ 可以借助grains的一些属性信息来执行
+ salt -G role:nginx cmd.run 'hostname'     -G 用来匹配 grains 里的信息
+
+
+
+
+
+
+
+saltstack – pillar   #存重要的数据
+
+ pillar和grains不一样，是在master上定义的，并且是针对minion定义的一些信息。像一些比较重要的数据（密码）可以存在pillar里，还可以定义变量等。
+ 配置自定义pillar
+ vim  /etc/salt/master
+ 找到如下配置：//去掉前面的警号
+pillar_roots:
+  base: #此行前面有两个空格
+    - /srv/pillar #此行前面有4个空格
+ mkdir /srv/pillar
+ vim /srv/pillar/test.sls  //内容如下
+ conf: /etc/123.conf
+
+
+saltstack 配置文件后缀名   *.sls
+
+
+
+
+vi /srv/pillar/top.sls  //内容如下    总入口文件
+
+base:
+  'aming-02': #此行前面有两个空格
+    - test #此行前面有4个空格
+ 重启master
+ systemctl  restart salt-master
+ 当更改完pillar配置文件后，我们可以通过刷新pillar配置来获取新的pillar状态：
+ salt '*' saltutil.refresh_pillar
+ 验证：salt  '*' pillar.item conf
+ pillar同样可以用来作为salt的匹配对象。比如 salt  -I 'conf:/etc/123.conf'  test.ping
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+saltstack – 安装配置httpd
+
+master上 vi /etc/salt/master //搜索找到file_roots
+ 打开如下内容的注释：
+file_roots:
+  base: #前面有两个空格
+    - /srv/salt #前面有4个空格
+ mkdir  /srv/salt ; cd /srv/salt
+ vi /srv/salt/top.sls  //加入如下内容
+base:
+  '*':  #前面有两个空格
+    - httpd #前面有4个空格
+ 意思是，在所有的客户端上执行httpd模块
+ 重启 systemctl restart salt-master
+
+
+
+
+
+
+master上vi /srv/salt/httpd.sls  //加入如下内容，这个就是httpd模块的内容
+httpd-service:    #自定义的id
+  pkg.installed:   #为包安装函数，下面是要安装的包的名字
+    - names:    //这里如果只有一个服务，那么就可以写成 –name: httpd 不用再换一行了。
+      - httpd
+      - httpd-devel
+  service.running:    #来保证指定的服务启动
+    - name: httpd
+    - enable: True   #enable表示开机启动。
+ 说明: httpd-service是id的名字，自定义的。pkg.installed 为包安装函数，下面是要安装的包的名字。service.running也是一个函数，来保证指定的服务启动，enable表示开机启动。
+ 执行： salt 'aming-02' state.highstate//执行过程会比较慢，因为客户端上在yum install httpd httpd-devel
+
+
+
+
+
+
+
+
+
+
+
+
+saltstack – 配置管理文件
+
+master上vi /srv/salt/test.sls  //加入如下内容
+file_test:      #ID
+  file.managed:   #函数，管理文件
+    - name: /tmp/aminglinux.com   #客户端存储路径
+    - source: salt://test/123/1.txt   # master 来源文件
+    - user: root      #该文件的属主
+    - group: root     #该文件的属组
+    - mode: 600       # 该文件的权限 
+说明：第一行的file_test为自定的名字，表示该配置段的名字，可以在别的配置段中引用它，source指定文件从哪里拷贝，这里的salt://test/123/1.txt相当于是/srv/salt/test/123/1.txt
+
+
+
+ mkdir /srv/salt/test/123
+ cp /etc/passwd /srv/salt/test/123/1.txt
+ vi /srv/salt/top.sls //改为如下内容
+base:
+  '*':
+    - test
+ 执行： salt 'aming-02' state.highstate
+ 检查aming-02上是否有/tmp/aminglinux.com，检查内容以及权限
+
+
+
+
+
+
+
+
+
+
+saltstack – 配置管理目录
+ master上vi /srv/salt/test_dir.sls  //加入如下内容
+
+file_dir:         #模块
+  file.recurse:    #针对目录用，recurse
+    - name: /tmp/testdir   #对方目录
+    - source: salt://test/123   #本机源目录
+    - user: root      #属主
+    - file_mode: 640   # 文件权限640
+    - dir_mode: 750       # 目录权限 750
+    - mkdir: True     #是否自动创建，如果源目录里没有文件的，则目标机器不会创建空目录
+    - clean: True //加上它之后，源删除文件或目录，目标也会跟着删除，否则不会删除
+
+
+
+修改入口文件
+ 修改top.sls, vi /srv/salt/top.sls //改为如下内容
+base:
+  '*':
+    - test_dir 
+ 执行： salt 'huidou05' state.highstate
+ 检查huidou05上是否有/tmp/testdir，检查里面的目录、文件以及权限
+ 说明：这里有一个问题，如果source对应的目录里有空目录的话，客户端上不会创建该目录
+
+
+
+
+
+
+
+
+
+saltstack – 配置管理远程命令
+
+ master上vi /srv/salt/shell_test.sls  //加入如下内容
+ shell_test:
+  cmd.script:
+    - source: salt://test/1.sh
+    - user: root
+ vi /srv/salt/test/1.sh //加入如下内容
+#!/bin/bash
+touch /tmp/111.txt 
+if [ ! -d /tmp/1233 ]
+then
+    mkdir /tmp/1233
+fi
+
+
+更改top.sls内容
+base:
+  '*':
+    - shell_test
+ 执行： salt 'aming-02' state.highstate
+ 检查是否有/tmp/111.txt和/tmp/1233
+执行结果直接传给目标机器， 不会将原脚本传入机器
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+saltstack – 配置管理任务计划
+
+ master上vi /srv/salt/cron_test.sls  //加入如下内容
+cron_test:       
+  cron.present:   #创建
+    - name: /bin/touch /tmp/111.txt
+    - user: root
+    - minute: '*'  #分钟
+    - hour: 20     #小时
+    - daymonth: '*' #天
+    - month: '*'    #月
+    - dayweek: '*’  #周
+ 注意，*需要用单引号引起来。当然我们还可以使用file.managed模块来管理cron，因为系统的cron都是以配置文件的形式存在的。想要删除该cron，需要增加：
+cron.absent:       #删除
+  - name: /bin/touch /tmp/111.txt
+ 两者不能共存，要想删除一个cron，那之前的present就得去掉。
+
+
+ 更改top.sls
+base:
+  '*':
+    - cron_test
+ 执行： salt 'aming-02' state.highstate
+ 到aming-02上检查cron，会看到提示# Lines below here are managed by Salt, do not edit
+ 我们不能随意改动它，否则就没法删除或者修改这个cron了。
+  
+# 最好是直接/var/spool/cron/root 将其推送
+
+
+
+
+
+
+
+
+
+saltstack – 其它可能会用到的命令
+
+ cp.get_file #拷贝master上的文件到客户端
+ salt '*' cp.get_file salt://test/1.txt  /tmp/123.txt  
+     # salt '目标机器' cp.get_file salt://源地址路径 /目标地址路径
+
+ cp.get_dir 拷贝目录
+ salt '*' cp.get_dir salt://test/conf /tmp/ 
+     # salt '目标机器' cp.get_dir salt://源地址路径 /目标地址路径
+   #会自动在客户端创建conf目录，所以后面不要加conf，如果写成 /tmp/conf/  则会在/tmp/conf/目录下又创建conf
+
+ salt-run manage.up    ##显示存活的minion
+
+ salt '*' cmd.script salt://test/1.sh  ##命令行下执行master上的shell脚本
+   # salt '目标机器' cmd.script salt://执行master上的shell脚本源地址路径 
+
+
+
+
+
+
+
+
+
+
+
+salt-ssh使用
+
+ salt-ssh不需要对客户端做认证，客户端也不用安装salt-minion，它类似pssh/expect
+ 安装很简单yum install -y https://repo.saltstack.com/yum/redhat/salt-repo-latest-2.el7.noarch.rpm
+   需要yum一个包  salt-ssh
+  yum install -y salt-ssh
+ vi /etc/salt/roster //增加如下内容
+aming-01:
+  host: 192.168.1.11
+  user: root
+  passwd: 359171106
+aming-02:
+  host: 192.168.133.12
+  user: root
+  passwd: 359171106
+ salt-ssh --key-deploy '*' -r 'w' ##第一次执行的时候会自动把本机的公钥放到对方机器上，然后就可以把roster里面的密码去掉 -r '命令' -r 接要操作的命令
+  #salt-shh --key-deploy  用于第一次登陆的机器时，需要手动去确认yes 才可以
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Ansible介绍
+
+ 不需要安装客户端，通过sshd去通信
+ 基于模块工作，模块可以由任何语言开发
+ 不仅支持命令行使用模块，也支持编写yaml格式的playbook，易于编写和阅读
+ 安装十分简单，centos上可直接yum安装
+ 有提供UI（浏览器图形化）www.ansible.com/tower，收费的
+ 官方文档 http://docs.ansible.com/ansible/latest/index.html
+ ansible已经被redhat公司收购，它在github上是一个非常受欢迎的开源软件，github地址https://github.com/ansible/ansible
+ 一本不错的入门电子书 https://ansible-book.gitbooks.io/ansible-first-book/
+
+
+
+
+
+
+ansible 安装
+ 准备两台机器，前面我们做实验的两台机器aming-01,aming-02
+ 只需要在aming-01上安装ansible
+ yum list |grep ansible 可以看到自带源里就有2.4版本的ansible
+ yum install -y ansible
+
+ huidou01上生成密钥对 ssh-keygen -t rsa   #-t 表示生成rsa 的类型
+     #私钥 (id_rsa) 与公钥 (id_rsa.pub)
+ 把公钥放到aming-02上，设置密钥认证
+ vi /etc/ansible/hosts //增加
+[testhost]
+127.0.0.1
+192.168.133.132
+说明： testhost为主机组名字，自定义的。 下面两个ip为组内的机器ip。
+
+
+
+
+
+
+
+
+
+Ansible远程执行命令
+ ansible testhost -m command -a 'w'    #-m后边是模块名字 -a后面是命令
+ 这样就可以批量执行命令了。这里的testhost 为主机组名，-m后边是模块名字，-a后面是命令。当然我们也可以直接写一个ip，针对某一台机器来执行命令。
+ ansible 127.0.0.1 -m  command -a 'hostname'  #也可以使用单个机器IP
+
+ 错误："msg": "Aborting, target uses selinux but python bindings (libselinux-python) aren't installed!"
+ 解决：yum install -y libselinux-python
+
+ 还有一个模块就是shell同样也可以实现
+ ansible testhost -m shell -a 'w'   # -m shell 执行远程的script
+
+
+
+
+
+
+
+
+Ansible拷贝文件或者目录
+ ansible huidou04 -m copy -a "src=/etc/ansible  dest=/tmp/ansibletest owner=root group=root mode=0755"
+ #注意：源目录会放到目标目录下面去，如果目标指定的目录不存在，它会自动创建。如果拷贝的是文件，dest指定的名字和源如果不同，并且它不是已经存在的目录，相当于拷贝过去后又重命名。但相反，如果desc是目标机器上已经存在的目录，则会直接把文件拷贝到该目录下面。
+ ansible huidou -m copy -a "src=/etc/passwd dest=/tmp/123"
+ #这里的/tmp/123和源机器上的/etc/passwd是一致的，但如果目标机器上已经有/tmp/123目录，则会再/tmp/123目录下面建立passwd文件
+ 
+# src=源路径 dest=目标路径 owner=拥有者 group=所属组 mode=权限
+
+例：
+[root@huidou05 ~]# ansible huidou -m copy -a "src=/root/sh dest=/tmp/ansible owner=root group=root mode=755"
+huidou07 | SUCCESS => {
+    "changed": true, 
+    "dest": "/tmp/ansible/", 
+    "src": "/root/sh"
+}
+127.0.0.1 | SUCCESS => {
+    "changed": true, 
+    "dest": "/tmp/ansible/", 
+    "src": "/root/sh"
+}
+huidou04 | SUCCESS => {
+    "changed": true, 
+    "dest": "/tmp/ansible/", 
+    "src": "/root/sh"
+
+
+
+
+
+
+
+
+
+
+Ansible远程执行脚本
+
+ 首先创建一个shell脚本
+ vim /tmp/test.sh //加入内容
+ #!/bin/bash
+ echo `date` > /tmp/ansible_test.txt
+ 然后把该脚本分发到各个机器上
+ ansible testhost -m copy -a "src=/tmp/test.sh dest=/tmp/test.sh mode=0755"
+ 最后是批量执行该shell脚本
+ ansible testhost -m shell -a "/tmp/test.sh"
+
+ shell模块，还支持远程执行命令并且带管道，command 模块不支持
+ ansible testhost -m shell -a "cat /etc/passwd|wc -l "
+
+
+
+
+
+
+
+
+
+
+Ansible管理任务计划
+ ansible testhost -m cron -a "name='test cron' job='/bin/touch /tmp/1212.txt' weekday=6"
+    ##name 指定组名，   job 指定 命令， 后面需要什么样的时间就写 ，其他的默认为*
+ 若要删除该cron 只需要加一个字段 state=absent
+ ansible testhost -m cron -a "name='test cron' state=absent"
+      # state =absent 即为删除
+ 其他的时间表示：分钟 minute 小时 hour 日期 day 月份 month
+
+
+
+
+
+
+Ansible安装rpm包/管理服务
+
+ ansible testhost -m yum -a "name=httpd" 
+ 在name后面还可以加上state=installed/removed   #添加或者删除
+ ansible testhost -m service -a "name=httpd state=started enabled=yes" #enabled 是否开机自启动
+ 这里的name是centos系统里的服务名，可以通过chkconfig --list查到。
+ Ansible文档的使用
+ ansible-doc -l 列出所有的模块
+ ansible-doc cron 查看指定模块的文档
+
+
+
+
+
+
+Ansible playbook的使用
+ 相当于把模块写入到配置文件里面，例：
+ vi /etc/ansible/test.yml //加入如下内容
+---
+- hosts: huidou02    #指定主机
+  remote_user: root
+  tasks:
+    - name: test_playbook
+      shell: touch /tmp/lishiming.txt
+ 说明：第一行需要有三个杠，hosts参数指定了对哪些主机进行参作，如果是多台机器可以用逗号作为分隔，也可以使用主机组，在/etc/ansible/hosts里定义；
+ user参数指定了使用什么用户登录远程主机操作；
+ tasks指定了一个任务，其下面的name参数同样是对任务的描述，在执行过程中会打印出来，可以自定义，shell是ansible模块名字
+ 执行：ansible-playbook test.yml
+
+
+
+
+
+
+
+
+Ansible playbook的使用
+
+
+再来一个创建用户的例子：
+ vi /etc/ansible/create_user.yml //加入如下内容
+---
+- name: create_user  #概述
+  hosts: aming-02     #针对的主机名
+  user: root     #用户
+  gather_facts: false    #false 不获取主机相关信息
+  vars:                #变量
+    - user: "test"      #变量的值
+  tasks:                #任务
+    - name: create user   #name是user模块里的一个参数 useradd
+      user: name="{{ user }}"   #调用变量
+说明：name参数对该playbook实现的功能做一个概述，后面执行过程中，会打印 name变量的值 ，可以省略；gather_facts参数指定了在以下任务部分执行前，是否先执行setup模块获取主机相关信息，这在后面的task会使用到setup获取的信息时用到；vars参数，指定了变量，这里指字一个user变量，其值为test ，需要注意的是，变量值一定要用引号引住；user提定了调用user模块，name是user模块里的一个参数，而增加的用户名字调用了上面user变量的值。
+
+
+
+
+
+
+
+
+
+
+
+
+Ansible playbook中的循环
+
+ vim /etc/ansible/while.yml //加入如下内容
+---
+- hosts: testhost   #指定主机
+  user: root    #指定用户
+  tasks:       #任务
+    - name: change mode for files #改变文件权限，如果没这个文件则创建
+      file: path=/tmp/{{ item }} state=touch mode=600 #file 模块，路径，命令，权限
+      with_items:   #指定那些文件变更
+        - 1.txt
+        - 2.txt
+        - 3.txt
+ 说明: with_items为循环的对象
+ 执行 ansible-playbook while.yml
+
+
+
+
+
+
+
+
+
+
+
+
+
+Ansible playbook中的条件判断
+ vi /etc/ansible/when.yml //加入如下内容
+---
+- hosts: testhost     #选择机器
+  user: root         #选择用户
+  gather_facts: True   #默认即打开
+  tasks:              #任务
+    - name: use when    #选择模块
+      shell: touch /tmp/when.txt   #执行的命令
+      when: ansible_ens33.ipv4.address == "192.168.1.9"   #判断条件，是在facter里面抓的数据
+ 说明：ansible huidou02 -m setup 可以查看到所有的facter信息   抓数据
+
+
+
+
+
+
+
+
+Ansible playbook中的handlers
+
+ 执行task之后，服务器发生变化之后要执行的一些操作，比如我们修改了配置文件后，需要重启一下服务 vi /etc/ansible/handlers.yml//加入如下内容
+---
+- name: handlers test       #handlers 类似命令行里的&& ，前面正确执行后才会传给后面执行！
+  hosts: huidou02            #针对的机器
+  user: root                  #用户
+  tasks:                  #任务
+    - name: copy file      #调用模块
+      copy: src=/etc/passwd dest=/tmp/aaa.txt   #命令
+      notify: test handlers      #当tasks正确执行，调用到handlers指定名字
+  handlers:
+    - name: test handlers     #自定义名称
+      shell: echo "111111" >> /tmp/aaa.txt    #继续执行的命令
+## 说明，只有copy模块真正执行后，才会去调用下面的handlers相关的操作。也就是说如果1.txt和2.txt内容是一样的，并不会去执行handlers里面的shell相关命令。 这种比较适合配置文件发生更改后，重启服务的操作。
+
+##支持通配符 * 
+
+
+
+
+
+
+
+
+playbook实战-nginx安装1    #1。先将需要的安装包整理好，创建好ansible需要的install，common等目录
+ 
+ 思路：先在一台机器上编译安装好nginx、打包，然后再用ansible去下发
+ cd /etc/ansible   进入ansible配置文件目录
+ mkdir  nginx_install   创建一个nginx_install的目录，方便管理
+ cd nginx_install
+ mkdir -p roles/{common,install}/{handlers,files,meta,tasks,templates,vars}
+ 说明：
+ roles目录下有两个角色，
+  common  为一些准备操作， 比如yum 要提前安装依赖包的  
+  install  为安装nginx的操作。每个角色下面又有几个目录， 
+     handlers  下面是当发生改变时要执行的操作，通常用在配置文件发生改变，重启服务。
+     files  为安装时用到的一些文件，    
+     meta   为说明信息，说明角色依赖等信息，   
+     tasks   里面是核心的配置文件，  
+     templates   通常存一些配置文件，启动脚本等模板文件，模板文件
+     vars   下为定义的变量
+
+#tar -zcvf nginx.tar.gz /usr/local/nginx/ --exclude=nginx.conf
+#cp /usr/local/nginx/conf/nginx.conf ./roles/install/templates/
+#cp /etc/init.d/nginx ./roles/install/templates/
+
+
+
+
+playbook实战-nginx安装2   #2 将安装包和配置文件放到指定目录内，并配置提前需要安装的yum文件
+
+ 需要事先准备好安装用到的文件，具体如下：
+ 在一台机器上事先编译安装好nginx，配置好启动脚本，配置好配置文件
+ 安装好后，我们需要把nginx目录打包，并放到/etc/ansible/nginx_install/roles/install/files/下面，名字为nginx.tar.gz
+ 启动脚本、配置文件都要放到/etc/ansible/nginx_install/roles/install/templates下面  #启动脚本、配置文件，存放处
+ cd  /etc/ansible/nginx_install/roles
+ 定义common的tasks，nginx是需要一些依赖包的
+  vim  ./common/tasks/main.yml //内容如下
+- name: Install initializtion require software
+  yum: name="zlib-devel,pcre-devel"
+
+
+
+
+
+playbook实战-nginx安装3  #3 定义需要用到的变量，再将文件拷贝到指定目录上，
+ 
+定义变量
+vim /etc/ansible/nginx_install/roles/install/vars/main.yml //内容如下
+nginx_user: www
+nginx_port: 80
+nginx_basedir: /usr/local/nginx
+
+首先要把所有用到的文档拷贝到目标机器
+
+vim   /etc/ansible/nginx_install/roles/install/tasks/copy.yml //内容如下
+- name: Copy Nginx Software
+  copy: src=nginx.tar.gz dest=/tmp/nginx.tar.gz owner=root group=root #将压缩文件放到指定服务器上
+- name: Uncompression Nginx Software
+  shell: tar zxf /tmp/nginx.tar.gz -C /usr/local/      #从指定位置上解压 -C 选项的作用是：指定需要解压到的目录。
+- name: Copy Nginx Start Script
+  template: src=nginx dest=/etc/init.d/nginx owner=root group=root mode=0755  #复制启动脚本到指定目录下
+- name: Copy Nginx Config
+  template: src=nginx.conf dest={{ nginx_basedir }}/conf/ owner=root group=root mode=0644
+
+
+
+
+
+playbook实战-nginx安装4  #4 useradd , start nginx, remove nginx.tar.gz
+
+接下来会建立用户，启动服务，删除压缩包
+  vim /etc/ansible/nginx_install/roles/install/tasks/install.yml //内容如下
+- name: Create Nginx User
+  user: name={{ nginx_user }} state=present createhome=no shell=/sbin/nologin  #create user
+- name: Start Nginx Service
+  shell: /etc/init.d/nginx start   # start nginx
+- name: Add Boot Start Nginx Service  
+  shell: chkconfig --level 345 nginx on   #开机自启动
+- name: Delete Nginx compression files
+  shell: rm -rf /tmp/nginx.tar.gz    #删除原压缩包
+
+
+
+
+
+
+
+
+playbook实战-nginx安装5   #5 创建入口文件，定义入口的配置文件 include  ， 执行ansible-playbook
+ 
+再创建main.yml并且把copy和install调用    #入口文件
+vim   /etc/ansible/nginx_install/roles/install/tasks/main.yml //内容如下
+- include: copy.yml
+- include: install.yml
+
+到此两个roles：common和install就定义完成了，接下来要定义一个入口配置文件
+
+vim  /etc/ansible/nginx_install/install.yml  //内容如下
+---
+- hosts: testhost    #自定机器
+  remote_user: root  #远程用户
+  gather_facts: True   #默认为True
+  roles:
+    - common
+    - install
+执行： ansible-playbook /etc/ansible/nginx_install/install.yml
+
+
+
+
+
+
+管理配置文件
+
+ 生产环境中大多时候是需要管理配置文件的，安装软件包只是在初始化环境的时候用一下。下面我们来写个管理nginx配置文件的playbook
+ mkdir  -p /etc/ansible/nginx_config/roles/{new,old}/{files,handlers,vars,tasks}
+ 其中new为更新时用到的，old为回滚时用到的，files下面为nginx.conf和vhosts目录，handlers为重启nginx服务的命令
+ 关于回滚，需要在执行playbook之前先备份一下旧的配置，所以对于老配置文件的管理一定要严格，千万不能随便去修改线上机器的配置，并且要保证new/files下面的配置和线上的配置一致
+ 先把nginx.conf和vhosts目录放到files目录下面
+ cd /usr/local/nginx/conf/
+ cp -r nginx.conf vhost  /etc/ansible/nginx_config/roles/new/files/
+
+
+#需要生产几个规定好的目录，将配置文件拷贝到roles/new/files/目录下面
+
+
+
+
+
+ vim /etc/ansible/nginx_config/roles/new/vars/main.yml   #定义变量
+ nginx_basedir: /usr/local/nginx
+ vim /etc/ansible/nginx_config/roles/new/handlers/main.yml  #定义handlers 重新加载nginx服务
+- name: restart nginx
+  shell: /etc/init.d/nginx reload
+ vim /etc/ansible/nginx_config/roles/new/tasks/main.yml    #主要是将文件推过去，然后使用notify，调用handlers
+- name: copy conf file  
+  copy: src={{ item.src }} dest={{ nginx_basedir }}/{{ item.dest }} backup=yes owner=root group=root mode=0644
+  with_items:
+    - { src: nginx.conf, dest: conf/nginx.conf }                   #backup 将其已推送过去的时间进行备份
+    - { src: vhosts, dest: conf/ }
+  notify: restart nginx
+
+
+
+
+
+ vim /etc/ansible/nginx_config/update.yml   # 定义总入口配置
+--- 
+- hosts: testhost         #指定主机或者组
+  user: root                 #用户
+  roles:                    #指定使用哪个目录
+  - new
+ 执行： ansible-playbook /etc/ansible/nginx_config/update.yml
+
+
+回滚 
+ 而回滚的backup.yml对应的roles为old
+ rsync -av  /etc/ansible/nginx_config/roles/new/ /etc/ansible/nginx_config/roles/old/
+ 回滚操作就是把旧的配置覆盖，然后重新加载nginx服务, 每次改动nginx配置文件之前先备份到old里，对应目录为/etc/ansible/nginx_config/roles/old/files 
+ vim /etc/ansible/nginx_config/rollback.yml // 最后是定义总入口配置
+---
+- hosts: testhost
+  user: root
+  roles:
+  - old 
+
+
+
+
+
+
+
+
+
+

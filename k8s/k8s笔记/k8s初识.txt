@@ -1,0 +1,411 @@
+Kubernetes也就是k8s
+
+Kubernetes is an open-source system for automating deployment, scaling, and management of containerized
+applications.
+Kubernetes是一个开源系统，它主要用来自动部署、扩容缩容和管理容器应用。
+
+It groups containers that make up an application into logical units for easy management and discovery. Kubernetes
+builds upon 15 years of experience of running production workloads at Google, combined with best-of-breed ideas
+and practices from the community.
+它将诸多应用的容器分为若干个逻辑单元以便于管理和发现。Kubernetes拥有着Google高负载生产环境的15年经验，并结合了社区的优秀思想和实践。
+在kubernetes中，service是核心，我们并不需要太多关注kubernetes里面是怎么工作的，我们只需要关心它给我们提供什么
+service。
+
+
+就像docker容器可以提供一个mysqld的服务、web服务等。
+
+它需要拥有一个唯一的名字、有ip：port对外提供服务。
+
+提供service的是容器，为了保证service的高可用，提供service的容器不能只有一个，需要一组。这一组容器我们把它叫做
+pod。
+
+为了实现service和pod之间的关联，又有了标签（label）的概念，我们把功能相同的pod设定为同一个标签，比如，可以把所有提供mysql服务的pod贴上标签name＝mysql，这样mysql service要作用于所有包含name＝mysql标签的pod上。
+
+1个seriver 可以有多个pod的
+
+pod运行在Node上，Node可以是一台物理机，也可以是虚拟机，通常一个Node上会运行几百个pod。每个pod里运行着一个特殊的容器，叫做Pause，其他容器叫做业务容器，业务容器共享Pause容器的网络栈和Volume挂载卷，因此同一个pod内的业务容器之间的通信和数据交换更为高效。
+
+在集群管理方面，kubernetes将集群中的机器划分为一个master节点和一群工作节点Node，其中master上运行着kubeapiserver
+、kube-controller-manager、kube-scheduler，它们实现了资源管理、pod调度、弹性伸缩、安全控制、系统监控、纠错等功能。Node是工作节点，运行应用程序，提供服务。
+Node上的最小单元是pod，Node上运行着kubernetesd的kubelet、kube-proxy服务进程，它们负责pod的创建、启动、监控、重启、销毁，以及实现负载均衡。
+
+
+
+master 节点，用来各个node管理的
+运行着kubeapiserver、kube-controller-manager、kube-scheduler，它们实现了资源管理、pod调度、弹性伸缩、安全控制、系统监控、纠错等功能
+
+
+Node 工作节点，是用来运行这些service的
+Node上的最小单元是pod（pod 里面又有容器），Node上运行着kubernetesd的kubelet、kube-proxy服务进程，它们负责pod的创建、启动、监控、重启、销毁，以及实现负载均衡。
+
+node 又有pause 用来通信的
+
+
+运行应用程序，提供服务。
+
+
+
+扩容和升级需要一个关键的东西，Replication controller（副本控制器）（RC），RC需要包含3个关键信息：
+1）目标pod的定义   pod 个数
+2）目标pod需要运行的副本数量（replicas）
+3）要监控的目标pod的标签（Label）
+
+工作过程：RC里定义好3个指标，kubernetes会根据RC定义的Label筛选出对应的pod，并实时监控其状态和数量，当实例数量少于定义的副本数（replicas），则会根据RC定义的pod模版来创建新的pod，然后将此pod调度到合适的Node上启动并运行。该过程完全自动化，无需人工干涉。
+
+
+
+
+为了不让宿主机网卡出故障  可以吧虚拟的virbr0 删掉
+这是由于安装和启用了 libvirt 服务后生成的，libvirt 在服务器（host）上生成一个 virtual network switch (virbr0)，host 上所有的虚拟机（guests）通过这个 virbr0 连起来。默认情况下 virbr0 使用的是 NAT 模式（采用 IP Masquerade），所以这种情况下 guest 通过 host 才能访问外部。
+大多数时候我们虚拟机使用的是 bridge（网桥）直接连到局域网里，所以这个 virbr0 不是必须的（注：不要搞混淆了，bridge 和这里的 virbr0 bridge 是互不相干的）。如何关掉这个 virbr0 呢？先 net-destroy 然后 net-undefine，最后别忘了重启 libvirtd 让设置生效：
+# virsh net-list 
+Name                State      Autostart 
+----------------------------------------- 
+default              active    yes
+
+# virsh net-destroy default 
+Network default destroyed 
+
+# virsh net-undefine default 
+Network default has been undefined 
+
+# service libvirtd restart
+
+
+
+################################
+快照
+[root@huidou02 kubernetes]# virsh snapshot-list hc_k8s
+ 名称               Creation Time             状态
+------------------------------------------------------------
+ 1542355158           2018-11-16 15:59:18 +0800 shutoff
+################################
+
+
+
+安装kubernetes
+准备一台centos7.5
+
+cat /etc/redhat-release
+
+从一个例子开始：
+webapp + mysql
+安装kubernetes
+准备一台centos7
+1） 关闭firewalld 和 selinux
+systemctl stop firewalld
+systemctl disable firewalld
+setenforce 0   #关闭 selinux
+
+2）安装etcd和kubernetes
+yum install -y etcd kubernetes
+ #etcd 是用于存储kubernetes集群里的配置文件的，可以做分布式
+
+
+3）修改配置文件    #不修改，后期会有很多问题
+vim /etc/sysconfig/docker
+##将--selinux-enabled 改为 --selinux-enabled=false --insecure-registry gcr.io
+
+vim /etc/kubernetes/apiserver
+##把 --admission_control 参数中的"ServiceAccount"删除
+
+
+4）准备工作
+yum install python-rhsm-certificates
+
+##如果提示python-rhsm-certificates-1.19.10-1.el7_4.x86_64 被已安装的 subscription-manager-rhsm-certificates-1.20.11-1.el7.centos.x86_64 取代
+那么下载这个
+wget http://mirror.centos.org/centos/7/os/x86_64/Packages/python-rhsm-certificates-1.19.10-1.el7_4.x86_64.rpm
+
+rpm2cpio python-rhsm-certificates-1.19.10-1.el7_4.x86_64.rpm |cpio -iv --to-stdout ./etc/rhsm/ca/redhatuep.pem > /etc/rhsm/ca/redhat-uep.pem
+
+
+
+5 配置docker加速器
+vim /etc/docker/daemon.json    //加入如下内容
+{
+"registry-mirrors": ["https://dhq9bx4f.mirror.aliyuncs.com"]
+}
+
+
+5）按顺序启动所有服务
+for s in etcd docker kube-apiserver kube-controller-manager kube-scheduler kubelet kube-proxy
+do
+systemctl start $s
+done
+
+
+######################
+master 节点上需要的服务
+kube-apiserver kube-controller-manager kube-scheduler 
+
+node上需要的服务
+kubelet kube-proxy
+######################
+
+
+
+6）创建一个rc文件
+
+vim mysql-rc.yaml   #内容如下,注意！空格！
+
+apiVersion: v1                #定义版本
+kind: ReplicationController    #副本控制器RC
+metadata:
+  name: mysql        #RC的名称，全局唯一
+spec:
+  replicas: 1      #Pod副本的期待数量，如果是10 即为10个pod 最终会形成一个service
+  selector:           #标签
+    app: mysql       #符合目标的Pod拥有此标签，标签名
+  template:       #根据此模板创建Pod的副本（实例）
+    metadata:
+      labels:
+        app: mysql        #Pod副本拥有的标签，对应RC的Selector
+    spec:
+      containers:            # Pod内容器的定义部分
+      - name: mysql            #容器的名称
+        image: mysql:5.6        #容器对应的Docker image
+        ports:
+        - containerPort: 3306      #容器应用监听的端口号
+        env:        #注入容器内的环境变量
+        - name: MYSQL_ROOT_PASSWORD    #定义mysql 密码
+          value: "123456"
+
+
+####################
+mysql-rc.yaml   这个rc里面的mysql的密码不能自定义，必须是‘123456’
+不然最后是访问 localhsot:30001/demo/ 会报密码错误
+####################
+
+kubectl create -f mysql-rc.yaml    #创建 rc 
+
+kubectl get rc     #查看rc 
+[root@hc_k8s ~]# kubectl get rc
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     1         1         0         2m
+
+kubectl get pods    #查看 pod
+[root@hc_k8s ~]# kubectl get pod
+NAME          READY     STATUS              RESTARTS   AGE
+mysql-bj3hr   0/1       ContainerCreating   0          3m
+
+
+他创建的时候做的事情是从docker 镜像里面下载到本机
+tail /var/log/messages 
+docker pull registry.access.redhat.com/rhel7/pod-infrastructure:latest
+docker pull mysql:5.6
+
+
+
+从官方的docker pull 下来的镜像   
+[root@hc_k8s ~]# docker images
+REPOSITORY                                            TAG                 IMAGE ID            CREATED             SIZE
+docker.io/mysql                                       5.6                 a46c2a2722b9        2 weeks ago         256 MB
+registry.access.redhat.com/rhel7/pod-infrastructure   latest              99965fb98423        13 months ago       209 MB
+
+
+   registry.access.redhat.com/rhel7/pod-infrastructure 
+
+#这个是kubernetes 官方的pod ，必须要有这个！
+
+   docker.io/mysql   
+#官方的mysql镜像
+
+
+当 get pod 为running 即可
+[root@hc_k8s ~]# kubectl get pod
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-bj3hr   1/1       Running   0          6m
+
+
+
+
+
+
+7）创建一个service文件
+vim mysql-svc.yaml
+apiVersion: v1    #定义版本
+kind: Service     #定义service
+metadata:  
+  name: mysql      #标签
+spec:
+  ports:
+    - port: 3306   #定义端口
+  selector:
+    app: mysql     
+
+
+
+kubectl create -f mysql-svc.yaml     #创建service
+kubectl get svc   #查看service
+
+[root@hc_k8s ~]# kubectl get svc
+NAME         CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+kubernetes   10.254.0.1       <none>        443/TCP    8m
+mysql        10.254.125.198   <none>        3306/TCP   11s
+
+
+创建成功
+mysql 的IP  10.254.125.198
+
+
+然后用客户端的mysql 去连接连接检测一下 是否正常
+yum -y install mysql
+  mysql -h 10.254.55.81 -u root -p'359171106'
+    show databases;
+
+
+8）创建web rc文件
+vim web-rc.yaml
+
+kind: ReplicationController
+metadata:
+  name: myweb
+spec:
+  replicas: 1
+  selector:
+    app: myweb
+  template:
+    metadata:
+      labels:
+        app: myweb
+    spec:
+      containers:
+        - name: myweb
+          image: kubeguide/tomcat-app:v1
+          ports:
+          - containerPort: 8080
+          env:
+          - name: MYSQL_SERVICE_HOST
+            value: '10.254.191.50'   #这里的IP需要通过kubectl get svc 查看mysql的cluster ip,最好有dns才能
+          - name: MYSQL_SERVICE_PORT
+            value: '3306'
+
+
+kubectl create -f web-rc.yaml    #创建web的rc 控制器
+ 
+
+[root@hc_k8s ~]# kubectl get pod
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-bj3hr   1/1       Running   0          47m
+myweb-w2qt5   1/1       Running   0          5m
+
+running了再去创建  service ！
+
+
+9）创建web svc文件 
+
+vim web-svc.yaml
+
+kind: Service
+metadata:
+  name: myweb
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      nodePort: 30001    #service 的访问端口，最低是30000端口开始
+  selector:
+    app: myweb
+
+
+kubectl create -f web-svc.yaml    #创建web的service 
+
+
+
+
+  
+10）访问，要打开Firewall的   forward
+iptables -P FORWARD ACCEPT
+curl 192.168.1.5:30001/demo/ 或浏览器
+
+
+
+
+
+
+--------------------------------------
+kubectl create -f mysql-rc.yaml
+
+kubectl get rc
+
+kubectl get pod
+
+kubectl create -f mysql-svc.yaml 
+
+kubectl get svc
+
+kubectl create -f web-rc.yaml
+
+kubectl get pod
+
+kubectl create -f web-svc.yaml
+
+
+
+
+
+问题
+https://blog.csdn.net/gezilan/article/details/80011905
+https://www.cnblogs.com/neutronman/p/8047547.html
+https://blog.csdn.net/d7185540/article/details/80868816
+
+
+
+
+
+
+docker 
+
+如果要删docker 镜像和容器的话 
+先
+docker rm -f 'ID'    先删除容器
+再
+docker rmi 'ID'     再删镜像
+
+查看
+docker ps --all   #容器
+docker images     #镜像
+
+
+
+kubectl delete – 通过文件名、控制台输入、资源名或者label selector删除资源。
+
+通过文件名、控制台输入、资源名或者label selector删除资源。
+
+通过文件名、控制台输入、资源名或者label selector删除资源。 接受JSON和YAML格式的描述文件。
+只能指定以下参数类型中的一种：文件名、资源类型和名称、资源类型和label selector。 注意：delete命令不检查资源版本，如果有人在你进行删除操作的同时进行更新操作，他所做的更新将随资源同时被删除。
+
+kubectl delete ([-f FILENAME] | TYPE [(NAME | -l label | --all)])
+
+# 通过pod.json文件中指定的资源类型和名称删除一个pod
+
+$ kubectl delete -f ./pod.json
+
+
+# 通过控制台输入的JSON所指定的资源类型和名称删除一个pod
+
+$ cat pod.json | kubectl delete -f -
+
+
+# 删除所有名为“baz”和“foo”的pod和service
+
+$ kubectl delete pod,service baz foo
+
+
+# 删除所有带有lable name=myLabel的pod和service
+
+$ kubectl delete pods,services -l name=myLabel
+
+# 删除UID为1234-56-7890-234234-456456的pod
+
+$ kubectl delete pod 1234-56-7890-234234-456456
+
+
+
+# 删除所有的pod
+
+$ kubectl delete pods --all
+
+
+ kubectl delete pods,service,rc --all

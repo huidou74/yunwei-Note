@@ -1,0 +1,715 @@
+kubernetes     概念
+
+
+Master 中控中心
+Master是整个集群的控制中心，kubernetes的所有控制指令都是发给master，它负责具体的执行过程。一般我们会把master独立于一台物理机或者一台虚拟机，它的重要性不言而喻。
+
+master上有这些关键的进程：
+1. Kubernetes API Server（kube-apiserver)  #提供了HTTP Rest接口关键服务进程，是所有资源增、删、改、查等操作的唯一入口，也是集群控制的入口进程。
+2. Kubernetes Controller Manager(kube-controlker-manager)   #是所有资源对象的自动化控制中心，可以理解为资源对象的大总管。
+3. Kubernetes Scheduler(kube-scheduler)  #负责资源调度（pod调度）的进程，相当于公交公司的“调度室”。Scheduler 调度的
+4. etcd Server，kubernetes  #里所有资源对象的数据都是存储在etcd中的
+
+
+Node
+除了Master，Kubernetes集群中其他机器被称为Node，早期版本叫做Minion。node 里面有docker
+Node可以是物理机也可以是虚拟机，每个Node上会被分配一些工作负载（即，docker容器），当Node宕机后，其上面跑的应用会被转移到其他Node上。
+
+Node上有这些关键进程：
+kubelet：   负责Pod对应容器的创建、启停等任务，同时与Master节点密切协作，实现集群管理的基本功能。
+kube-proxy：   实现Kubernetes Service的通信与负载均衡机制的重要组件。proxy代理
+Docker Engine（docker）：   Docker引擎，负责本机容器的创建和管理。
+
+kubectl get nodes     #查看集群中有多少个node节点
+kubectl describe node <node name>    #查看Node的详细信息
+
+
+
+
+
+
+Pod
+查看pod命令：   kubectl get pods
+查看容器命令：  docker ps
+可以看到容器和pod是有对应关系的，在我们做过的实验中，每个pod对应两个容器，一个是Pause容器，一个是rc里面定义的容器（实际上，每个pod里可以有多个应用容器）。
+这个Pause容器叫做“根容器”，只有当Pause容器“死亡”才会认为该pod“死亡”。
+Pause容器的IP以及其挂载的Volume资源会共享给该pod下的其他容器。
+Pause容器  ：网络和数据的共享！
+
+pod定义示例：
+apiVersion: v1
+kind: pod
+metadata:
+  name: myweb
+  labels:
+    name: myweb
+spec:
+  containers:
+  - name: myweb
+    image: kubeguide/tomcat-app:v1
+    ports:
+    - containerPort: 8080
+    env:
+    - name: MYSQL_SERVICE_HOST
+      value: 'mysql'
+    - name: MYSQL_SERVICE_PORT
+      value: '3306'
+
+
+每个pod都可以对其能使用的服务器上的硬件资源进行限制（CPU、内存）。
+CPU限定的最小单位是1/1000个cpu，用m表示，如100m，就是0.1个cpu。
+内存限定的最小单位是字节，可以用Mi（兆） 表示，如128Mi就是128M。
+
+
+
+在kubernetes里，一个计算资源进行配额限定需要设定两个参数：
+1）requests：该资源的最小申请量。   #最小值
+2）Limits：该资源允许的最大使用量。 #最大值
+
+
+
+
+
+资源限定示例：
+spec:
+  containers:
+  - name: db
+    image: mysql
+    resources:
+      requests:            #限定最小值
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "128Mi"    #限定最大值
+        cpu: "500m"
+
+
+Label
+Label是一个键值对，其中键和值都由用户自定义，Label可以附加在各种资源对象上，如Node、Pod、Service、RC等。
+一个资源对象可以定义多个Label，同一个Label也可以被添加到任意数量的资源对象上。
+Label可以在定义对象时定义，也可以在对象创建完后动态添加或删除。
+
+
+Label示例：
+"release":"stable", "environment":"dev", "tier":"backend"等等。
+
+
+
+
+
+
+
+
+RC      replication controller
+RC是kubernetes中核心概念之一，简单说它定义了一个期望的场景，即声明某种pod的副本数量在任意时刻都符合某个预期值，RC定义了如下几个部分：
+1）pod期待的副本数
+2）用于筛选目标pod的Label Selector     #Selector下的app 
+3）创建pod副本的模板（template）
+
+RC一旦被提交到kubernetes集群后，Master节点上的Controller Manager组件就会接收到该通知，它会定期巡检集群中存活的pod，并确保pod数量符合RC的定义值。可以说通过RC，kubernetes实现了用户应用集群的高可用性，并且大大减少了管理员在传统IT环境中不得不做的诸多手工运维工作，比如编写主机监控脚本、应用监控脚本、故障恢复处理脚本等
+
+
+RC工作流程（假如，集群中有3个Node）：
+1）RC定义2个pod副本
+2）假设系统会在2个Node上（Node1和Node2）创建pod
+3）如果Node2上的pod（pod2）意外终止，这很有可能是因为Node2宕机
+4）则会创建一个新的pod，假设会在Node3上创建pod3，当然也有可能在Node1上创建pod3
+
+
+RC中动态修改pod副本数量：
+kubectl scale rc <rc name> --replicas=n
+
+
+实体操作
+
+[root@hc_k8s ~]# kubectl get rc                  #查看rc控制器
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     1         1         1         2d
+myweb     1         1         1         2d
+
+[root@hc_k8s ~]# kubectl get pod                    #查看pod数量，每个pod 的里面都会有一个 Pause。
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-5j3s1   1/1       Running   0          2d
+myweb-zbwx4   1/1       Running   0          2d
+[root@hc_k8s ~]# kubectl scale rc mysql --replicas=2     #动态增加pod的
+replicationcontroller "mysql" scaled                     #增加正常
+
+[root@hc_k8s ~]# kubectl get pod                     #查看新增的pod的
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-5j3s1   1/1       Running   0          2d
+mysql-p4d2s   1/1       Running   0          2s
+myweb-zbwx4   1/1       Running   0          2d
+
+[root@hc_k8s ~]# kubectl get rc                  #rc控制器也能看到已经mysql 变成2了
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     2         2         2         2d
+myweb     1         1         1         2d
+               
+[root@hc_k8s ~]# docker ps |grep mysql      #也能从docker这容器看出来，有新增的docker
+b78fdf4d3d1e        mysql:5.6                                                    "docker-entrypoint..."   4 minutes ago       Up 4 minutes                            k8s_mysql.65db1e76_mysql-p4d2s_default_8069657c-ebd2-11e8-a8bf-525400082fe7_95712acb
+337c4d22787f        registry.access.redhat.com/rhel7/pod-infrastructure:latest   "/usr/bin/pod"           4 minutes ago       Up 4 minutes                            k8s_POD.1d520ba5_mysql-p4d2s_default_8069657c-ebd2-11e8-a8bf-525400082fe7_69725a7c
+f5f28d836e09        mysql:5.6                                                    "docker-entrypoint..."   2 days ago          Up 2 days                               k8s_mysql.65db1e76_mysql-5j3s1_default_35774ed3-e979-11e8-a8bf-525400082fe7_1512c7d5
+f0e36313faf7        registry.access.redhat.com/rhel7/pod-infrastructure:latest   "/usr/bin/pod"           2 days ago          Up 2 days                               k8s_POD.1d520ba5_mysql-5j3s1_default_35774ed3-e979-11e8-a8bf-525400082fe7_c0aa28ac
+
+
+
+
+
+
+
+利用动态修改pod的副本数，可以实现应用的动态升级（滚动升级）：
+1）以新版本的镜像定义新的RC，但pod要和旧版本保持一致（由Label决定）
+2）新版本每增加1个pod，旧版本就减少一个pod，始终保持固定的值     #增加一个新的减少一个旧的
+3）最终旧版本pod数为0，全部为新版本  
+
+
+删除RC
+kubectl delete rc <rc name>
+删除RC后，RC对应的pod也会被删除掉，但是service需要手动删除
+
+
+
+
+
+Deployment
+在1.2版本引入的概念，目的是为了解决pod编排问题，在内部使用了Replica Set，它和RC比较，相似度为90%以上，可以认为是RC的升级版。 
+跟RC比较，最大的一个特点是可以知道pod部署的进度。
+
+
+
+
+Deployment示例：
+vim fr-dp.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      tier: frontend
+    matchExpressions:
+      - {key: tier, operator: In, values: [frontend]}
+  template:
+    metadata:
+      labels:
+        app: app-demo
+        tier: frontend
+    spec:
+      containers:
+      - name: tomcat-demo
+        image: tomcat
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+
+
+
+
+kubectl create -f fr-dp.yaml  #创建deployment
+
+kubectl get deployment      #查看deployment
+ 
+
+kubectl describe pod  'NAME'   #查看pod的详情
+
+
+
+操作如下
+
+[root@hc_k8s ~]# vim fr-dp.yaml
+[root@hc_k8s ~]# kubectl create -f fr-dp.yaml 
+deployment "frontend" created
+[root@hc_k8s ~]# kubectl get deployment
+NAME       DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+frontend   1         1         1            0           15s
+[root@hc_k8s ~]# kubectl get rc
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     2         2         2         3d
+myweb     1         1         1         2d
+[root@hc_k8s ~]# kubectl get pod
+NAME                       READY     STATUS              RESTARTS   AGE
+frontend-141477217-twk51   0/1       ContainerCreating   0          28s      
+mysql-5j3s1                1/1       Running             0          3d
+mysql-p4d2s                1/1       Running             0          19m
+myweb-zbwx4                1/1       Running             0          2d
+[root@hc_k8s ~]# kubectl describe pod frontend-141477217-twk51
+Name:		frontend-141477217-twk51
+Namespace:	default
+Node:		127.0.0.1/127.0.0.1
+Start Time:	Mon, 19 Nov 2018 16:29:07 +0800
+Labels:		app=app-demo
+		pod-template-hash=141477217
+		tier=frontend
+Status:		Pending
+IP:		
+Controllers:	ReplicaSet/frontend-141477217
+Containers:
+  tomcat-demo:
+    Container ID:		
+    Image:			tomcat
+    Image ID:			
+    Port:			8080/TCP
+    State:			Waiting
+      Reason:			ContainerCreating
+    Ready:			False
+    Restart Count:		0
+    Volume Mounts:		<none>
+    Environment Variables:	<none>
+Conditions:
+  Type		Status
+  Initialized 	True 
+  Ready 	False 
+  PodScheduled 	True 
+No volumes.
+QoS Class:	BestEffort
+Tolerations:	<none>
+Events:
+  FirstSeen	LastSeen	Count	From			SubObjectPath			Type		Reason			Message
+  ---------	--------	-----	----			-------------			--------	------			-------
+  2m		2m		1	{default-scheduler }					Normal		Scheduled		Successfully assigned frontend-141477217-twk51 to 127.0.0.1
+  2m		2m		1	{kubelet 127.0.0.1}					Warning		MissingClusterDNS	kubelet does not have ClusterDNS IP configured and cannot create Pod using "ClusterFirst" policy. Falling back to DNSDefault policy.
+  2m		2m		1	{kubelet 127.0.0.1}	spec.containers{tomcat-demo}	Normal		Pulling			pulling image "tomcat"
+
+#这里就能看到了 他在pull镜像
+
+#rc 和deployment都要
+
+
+
+
+
+
+
+
+HPA(Horizontail Pod Autoscaler)
+在1.1版本，kubernetes官方发布了HPA，实现pod的动态扩容、缩容，它属于一种kubernetes的资源对象。
+它通过追踪分析RC控制的所有目标pod的负载变化情况，来决定是否需要针对性地调整目标Pod的副本数，这是HPA的实现原理。
+
+pod负载度量指标：
+1）CpuUtilizationPercentage
+目标pod所有副本自身的cpu利用率平用均值。一个pod自身的cpu利用率＝该pod当前cpu的使用量／pod Request值。
+如果某一个时刻，CPUUtilizationPercentage的值超过了80%，则判定当前的pod已经不够支撑业务，需要增加pod。
+
+2）应用程序自定义的度量指标，比如服务每秒内的 请求数 （TPS 或 QPS）
+HPA示例：
+
+apiVerion: autosacling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+  namespace: default
+spec:
+  maxReplicas: 10     #范围值  1-10
+  minReplicas: 1
+  scaleTargetRef:
+    kind: Deployment
+    name: php-apache
+  targetCPUUtilizationPercentage: 90     #cpu 超过90% 即扩容
+
+
+说明：HPA控制的目标对象是一个名叫php-apache的Deployment里的pod副本，当cpu平均值超过90%时就会扩容，pod副本数控制范围是1－10.
+
+
+
+除了以上的xml文件定义HPA外，也可以用命令行的方式来定义：
+kubectl autoscale deployment php-apache --cpu-percent=90 --min=1 --max=10
+
+
+
+
+
+
+
+
+
+Service     #servier 由一组pod的组成
+Service是kubernetes中最核心的资源对象之一，Service可以理解成是微服务架构中的一个“微服务”，pod、RC、Deployment都是为Service提供嫁衣的。
+简单讲一个service本质上是一组pod组成的一个集群，前面我们说过service和pod之间是通过Label来串起来的，相同Service的pod的Label一样。
+同一个service下的所有pod是通过kube-proxy实现负载均衡，而每个service都会分配一个全局唯一的虚拟ip，也叫做cluster ip。
+在该service整个生命周期内，cluster ip是不会改变的，而在kubernetes中还有一个dns服务，它把service的name和cluster ip映射起来。
+
+cluster ip 	
+[root@hc_k8s ~]# kubectl get svc
+NAME         CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+kubernetes   10.254.0.1       <none>        443/TCP          3d
+mysql        10.254.58.94     <none>        3306/TCP         3d
+myweb        10.254.170.110   <nodes>       8080:30001/TCP   2d    #这个IP是映射出来的，可以使用的
+
+
+
+
+service示例:(文件名tomcat-service.yaml)
+vim fr-dp.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+  ports:
+    - port: 8080
+    selector:
+      tier: frontend
+
+
+kubectl create -f vim fr-dp.yaml
+kubectl get endpoints      //查看pod的IP地址以及端口
+
+[root@hc_k8s k8s]# kubectl get endpoints
+NAME         ENDPOINTS          AGE
+kubernetes   192.168.1.5:6443   1h
+mysql        172.17.0.2:3306    1h
+myweb        172.17.0.3:8080    1h         #这个pod的IP是容器内的IP
+
+
+kubectl get svc tomcat-service -o yaml    //查看service分配的cluster ip
+-o  : 指定格式输出
+
+
+输出如下
+[root@hc_k8s k8s]# kubectl get svc mysql -o yaml
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: 2018-11-16T08:31:31Z
+  name: mysql
+  namespace: default
+  resourceVersion: "887"
+  selfLink: /api/v1/namespaces/default/services/mysql
+  uid: 05218a93-e97a-11e8-a8bf-525400082fe7
+spec:
+  clusterIP: 10.254.58.94
+  ports:
+  - port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: mysql
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+
+
+
+
+
+
+多端口的service
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+ports:
+  - port: 8080          	#posts下面可以定义定义多端口
+    name: service-port
+  - port: 8005
+    name: shutdown-port
+  selector:
+    tier: frontend
+
+
+对于cluster ip有如下限制：
+1）Cluster ip无法被ping通，因为没有实体网络来响应   #  clusterIP: 10.254.58.94 ping不通的，可以Telnet
+2）Cluster ip和Service port组成了一个具体的通信端口，单独的Cluster ip不具备TCP/IP通信基础，它们属于一个封闭的空间。
+3）在kubernetes集群中，Node ip、pod ip、cluster ip之间的通信，采用的是kubernetes自己设计的一套编程方式的特殊路由规则。
+
+
+
+要想直接和service通信，需要一个Nodeport，在service的yaml文件中定义：
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+  ports:
+  - port: 8080
+    nodeport: 31002
+  selector:
+    tier: frontend  
+
+它实质上是把cluster ip的port映射到了node ip的nodeport上了，nodeport 端口必须大于30000
+
+
+
+
+
+
+
+
+
+
+
+Volume(存储卷)
+Volume是pod中能够被多个容器访问的共享目录，kubernetes中的volume和docker中的volume不一样，主要有以下几个方面：
+1）kubernetes的volume定义在pod上，然后被一个pod里的多个容器挂载到具体的目录下
+2）kubernetes的volume与pod生命周期相同，但与容器的生命周期没关系，当容器终止或者重启时，volume中的数据并不会丢失
+3）kubernetes支持多种类型的volume，如glusterfs，ceph等先进的分布式文件系统
+
+
+如何定义并使用volume呢？只需要在定义pod的yaml配置文件中指定volume相关配置即可：
+  template:
+    metadata:
+      labels:
+        app: app-demo
+        tier: frontend
+    spec:
+      volumes:
+        - name: datavol
+          emptyDir: {}
+      containers:
+      - name: tomcat-demo
+        image: tomcat
+        volumeMounts:
+          - mountPath: /mydata-data
+          name: datavol
+        imagePullPolicy: IfNotPresent
+
+说明: volume名字是datavol，类型是emptyDir，将volume挂载到容器的/mydata-data目录下
+
+
+
+volume的类型：
+
+1）emptyDir   #适合存放临时文件。
+是在pod分配到node时创建的，初始内容为空，不需要关心它将会在宿主机（node）上的哪个目录下，因为这是kubernetes自动分配的一个目录，当pod从node上移除，emptyDir上的数据也会消失。所以，这种类型的volume不适合存储永久数据，适合存放临时文件。
+
+2）hostPath    #这个类型适合一个node的情况，即为唯一的node才行，多个node 有多个目录
+hostPath指定宿主机（node）上的目录路径，然后pod里的容器挂载该共享目录。这样有一个问题，如果是多个node，虽然目录一样，但是数据不能做到一致，所以这个类型适合一个node的情况。
+
+
+
+配置示例：
+  volumes:
+    - name: "persistent-storage"
+      hostPath:         #适用于单节点存储
+        path: "/data"
+
+
+3）gcePersistentDisk
+使用Google公有云GCE提供的永久磁盘（PD）存储volume数据。毫无疑问，使用gcePersistentDisk的前提是kubernetes的node是基于GCE的。
+配置示例：
+volumes:
+- name: test-volume
+  gcePersistentDisk:
+    pdName: my-data-disk
+    fsType: ext4
+
+
+4）awsElasticBlockStore
+与GCE类似，该类型使用亚马逊公有云提供的EBS Volume存储数据，使用它的前提是Node必须是aws EC2。
+
+5）NFS
+使用NFS作为volume载体。
+
+
+示例：
+  volumes:
+    - name: "NFS"
+      NFS:
+        server: ip地址
+        path: "/"
+
+
+
+
+6）其他类型
+iscsi
+flocker
+glusterfs
+rbd
+gitRepo: 从git仓库clone一个git项目，以供pod使用
+secret: 用于为pod提供加密的信息
+
+
+
+
+persistent volume（PV）网络存储，
+PV可以理解成kubernetes集群中某个网络存储中对应的一块存储，它与volume类似，但有如下区别：
+1）PV只能是网络存储，不属于任何Node，但可以在每个Node上访问到
+2）PV并不是定义在pod上，而是独立于pod之外定义   #？？？？
+3）PV目前只有几种类型：GCE Persistent Disk、NFS、RBD、iSCSCI、AWS ElasticBlockStore、GlusterFS
+
+
+如下是NFS类型的PV定义：
+apiVersion: v1
+kind: PersistentVolume  #PV
+metadata:
+  name: pv0003
+spec:
+  capacity:
+    storage: 5Gi    #5G
+  accessModes:       #访问权限
+    - ReadWriteOnce   
+  nfs:       
+    path: /somepath      #nfs 对应目录
+    server: ip
+
+其中accessModes是一个重要的属性，目前有以下类型：
+ReadWriteOnce:    读写权限，并且只能被单个Node挂载
+ReadOnlyMany:     只读权限，允许被多个Node挂载
+ReadWriteMany：   读写权限，允许被多个Node挂载    #最大权限
+
+
+
+
+
+如果某个pod想申请某种条件的PV，首先需要定义一个PersistentVolumeClaim（PVC）对象：
+
+PVC的实例：
+
+kind: persistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: myclaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+
+然后在pod的vomume定义中引用上面的PVC：
+
+volumes:
+  - name: mypd
+    persistentVolumeClaim:
+      ClaimName: myclaim
+
+
+##先定义PV，然后PVC自动和PV关联，然后再pod或者rc 或者deployment里面再去引用这个PVC就可以了
+
+
+
+
+
+
+
+
+
+Namespace（命名空间）   #实现资源隔离。
+当kubernetes集群中存在多租户的情况下，就需要有一种机制实现每个租户的资源隔离。而namespace的目的就是为了实现资源隔离。
+
+kubectl get namespace //查看集群所有的namespace
+
+
+操作如下
+[root@hc_k8s ~]# kubectl get namespace
+NAME          STATUS    AGE
+default       Active    3d
+kube-system   Active    3d
+
+
+
+
+定义namespace：
+
+vim dev-namespace.yaml   #定义dev  namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+
+
+kubectl create -f dev-namespace.yaml //创建dev namespace然后再定义pod，再指定namespace
+
+
+
+vim busybox-pod.yaml      #定义pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox     #创建dev namespace然后再定义pod，再指定namespace
+  namespace: dev
+spec:
+  containers:
+  - image: busybox
+    command:
+      - sleep
+      - "500"
+    name: busybox
+
+
+查看某个namespace下的pod：
+
+kubectl get pod -n=dev 
+kubectl get pod --all-namespace
+kubectl get pod --namespace=dev
+
+
+
+操作如下：
+
+[root@hc_k8s ~]# vim dev-namespace.yaml
+[root@hc_k8s ~]# vim busybox-pod.yaml
+[root@hc_k8s ~]# kubectl create -f dev-namespace.yaml 
+namespace "dev" created
+[root@hc_k8s ~]# kubectl create -f busybox-pod.yaml 
+pod "busybox" created
+
+[root@hc_k8s ~]# kubectl get pod           #这样是查看不到的
+NAME                       READY     STATUS    RESTARTS   AGE
+frontend-141477217-twk51   1/1       Running   0          39m
+mysql-5j3s1                1/1       Running   0          3d
+mysql-p4d2s                1/1       Running   0          58m
+myweb-zbwx4                1/1       Running   0          3d
+[root@hc_k8s ~]# kubectl get pod --all-namespaces     #查看命令如下
+NAMESPACE   NAME                       READY     STATUS    RESTARTS   AGE
+default     frontend-141477217-twk51   1/1       Running   0          39m
+default     mysql-5j3s1                1/1       Running   0          3d
+default     mysql-p4d2s                1/1       Running   0          58m
+default     myweb-zbwx4                1/1       Running   0          3d
+dev         busybox                    1/1       Running   0          18s
+[root@hc_k8s ~]# kubectl get pod -n dev                #这样也行
+NAME      READY     STATUS    RESTARTS   AGE
+busybox   1/1       Running   0          24s
+[root@hc_k8s ~]# kubectl get pod --namespace=dev      #还有这样
+NAME      READY     STATUS    RESTARTS   AGE
+busybox   1/1       Running   0          38s
+
+
+
+
+
+
+
+
+
+
+
+
+总结一下：
+master    控制中心，物理层次上划分两个角色，一个是master和node
+
+master包含了4个服务或是进程，Kubernetes API Server，Kubernetes Controller Manager，Kubernetes Scheduler，etcd Server
+
+1. Kubernetes API Server（kube-apiserver)  #提供了HTTP Rest接口关键服务进程，是所有资源增、删、改、查等操作的唯一入口，也是集群控制的入口进程。
+2. Kubernetes Controller Manager(kube-controlker-manager)   #是所有资源对象的自动化控制中心，可以理解为资源对象的大总管。
+3. Kubernetes Scheduler(kube-scheduler)  #负责资源调度（pod调度）的进程，相当于公交公司的“调度室”。Scheduler 调度的
+4. etcd Server，kubernetes   #里所有资源对象的数据都是存储在etcd中的
+
+
+pod的和pace
+
+
+Label 是用于关联pod和service的
+
+
+rc  用来定义 pod的环境 场景
+
+deployment  是rc 的升级版，可以查看到pod定义的进度，rc 看不了
+
+
+HPA   是一个实现动态扩容缩容资源对象
+
+service  提供给用户最终的服务
+
+volume 存储卷
+
+PV 定义存储卷的
+PVC 来自动关联PV，必须一起用
+
+namespace  多租户的时候的隔离机制

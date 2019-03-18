@@ -1,0 +1,2166 @@
+Kubernetes也就是k8s
+
+Kubernetes is an open-source system for automating deployment, scaling, and management of containerized
+applications.
+Kubernetes是一个开源系统，它主要用来自动部署、扩容缩容和管理容器应用。
+
+It groups containers that make up an application into logical units for easy management and discovery. Kubernetes
+builds upon 15 years of experience of running production workloads at Google, combined with best-of-breed ideas
+and practices from the community.
+它将诸多应用的容器分为若干个逻辑单元以便于管理和发现。Kubernetes拥有着Google高负载生产环境的15年经验，并结合了社区的优秀思想和实践。
+在kubernetes中，service是核心，我们并不需要太多关注kubernetes里面是怎么工作的，我们只需要关心它给我们提供什么
+service。
+
+
+就像docker容器可以提供一个mysqld的服务、web服务等。
+
+它需要拥有一个唯一的名字、有ip：port对外提供服务。
+
+提供service的是容器，为了保证service的高可用，提供service的容器不能只有一个，需要一组。这一组容器我们把它叫做
+pod。
+
+为了实现service和pod之间的关联，又有了标签（label）的概念，我们把功能相同的pod设定为同一个标签，比如，可以把所有提供mysql服务的pod贴上标签name＝mysql，这样mysql service要作用于所有包含name＝mysql标签的pod上。
+
+1个seriver 可以有多个pod的
+
+pod运行在Node上，Node可以是一台物理机，也可以是虚拟机，通常一个Node上会运行几百个pod。每个pod里运行着一个特殊的容器，叫做Pause，其他容器叫做业务容器，业务容器共享Pause容器的网络栈和Volume挂载卷，因此同一个pod内的业务容器之间的通信和数据交换更为高效。
+
+在集群管理方面，kubernetes将集群中的机器划分为一个master节点和一群工作节点Node，其中master上运行着kubeapiserver
+、kube-controller-manager、kube-scheduler，它们实现了资源管理、pod调度、弹性伸缩、安全控制、系统监控、纠错等功能。Node是工作节点，运行应用程序，提供服务。
+Node上的最小单元是pod，Node上运行着kubernetesd的kubelet、kube-proxy服务进程，它们负责pod的创建、启动、监控、重启、销毁，以及实现负载均衡。
+
+
+
+master 节点，用来各个node管理的
+运行着kubeapiserver、kube-controller-manager、kube-scheduler，它们实现了资源管理、pod调度、弹性伸缩、安全控制、系统监控、纠错等功能
+
+
+Node 工作节点，是用来运行这些service的
+Node上的最小单元是pod（pod 里面又有容器），Node上运行着kubernetesd的kubelet、kube-proxy服务进程，它们负责pod的创建、启动、监控、重启、销毁，以及实现负载均衡。
+
+node 又有pause 用来通信的
+
+
+运行应用程序，提供服务。
+
+
+
+扩容和升级需要一个关键的东西，Replication controller（副本控制器）（RC），RC需要包含3个关键信息：
+1）目标pod的定义   pod 个数
+2）目标pod需要运行的副本数量（replicas）
+3）要监控的目标pod的标签（Label）
+
+工作过程：RC里定义好3个指标，kubernetes会根据RC定义的Label筛选出对应的pod，并实时监控其状态和数量，当实例数量少于定义的副本数（replicas），则会根据RC定义的pod模版来创建新的pod，然后将此pod调度到合适的Node上启动并运行。该过程完全自动化，无需人工干涉。
+
+
+
+
+为了不让宿主机网卡出故障  可以吧虚拟的virbr0 删掉
+这是由于安装和启用了 libvirt 服务后生成的，libvirt 在服务器（host）上生成一个 virtual network switch (virbr0)，host 上所有的虚拟机（guests）通过这个 virbr0 连起来。默认情况下 virbr0 使用的是 NAT 模式（采用 IP Masquerade），所以这种情况下 guest 通过 host 才能访问外部。
+大多数时候我们虚拟机使用的是 bridge（网桥）直接连到局域网里，所以这个 virbr0 不是必须的（注：不要搞混淆了，bridge 和这里的 virbr0 bridge 是互不相干的）。如何关掉这个 virbr0 呢？先 net-destroy 然后 net-undefine，最后别忘了重启 libvirtd 让设置生效：
+# virsh net-list 
+Name                State      Autostart 
+----------------------------------------- 
+default              active    yes
+
+# virsh net-destroy default 
+Network default destroyed 
+
+# virsh net-undefine default 
+Network default has been undefined 
+
+# service libvirtd restart
+
+
+
+################################
+快照
+[root@huidou02 kubernetes]# virsh snapshot-list hc_k8s
+ 名称               Creation Time             状态
+------------------------------------------------------------
+ 1542355158           2018-11-16 15:59:18 +0800 shutoff
+################################
+
+
+
+安装kubernetes
+准备一台centos7.5
+
+cat /etc/redhat-release
+
+从一个例子开始：
+webapp + mysql
+安装kubernetes
+准备一台centos7
+1） 关闭firewalld 和 selinux
+systemctl stop firewalld
+systemctl disable firewalld
+setenforce 0   #关闭 selinux
+
+2）安装etcd和kubernetes
+yum install -y etcd kubernetes
+ #etcd 是用于存储kubernetes集群里的配置文件的，可以做分布式
+
+
+3）修改配置文件    #不修改，后期会有很多问题
+vim /etc/sysconfig/docker
+##将--selinux-enabled 改为 --selinux-enabled=false --insecure-registry gcr.io
+
+vim /etc/kubernetes/apiserver
+##把 --admission_control 参数中的"ServiceAccount"删除
+
+
+4）准备工作
+yum install python-rhsm-certificates
+
+##如果提示python-rhsm-certificates-1.19.10-1.el7_4.x86_64 被已安装的 subscription-manager-rhsm-certificates-1.20.11-1.el7.centos.x86_64 取代
+那么下载这个
+wget http://mirror.centos.org/centos/7/os/x86_64/Packages/python-rhsm-certificates-1.19.10-1.el7_4.x86_64.rpm
+
+rpm2cpio python-rhsm-certificates-1.19.10-1.el7_4.x86_64.rpm |cpio -iv --to-stdout ./etc/rhsm/ca/redhatuep.pem > /etc/rhsm/ca/redhat-uep.pem
+
+
+
+5 配置docker加速器
+vim /etc/docker/daemon.json    //加入如下内容
+{
+"registry-mirrors": ["https://dhq9bx4f.mirror.aliyuncs.com"]
+}
+
+
+5）按顺序启动所有服务
+for s in etcd docker kube-apiserver kube-controller-manager kube-scheduler kubelet kube-proxy
+do
+systemctl start $s
+done
+
+
+######################
+master 节点上需要的服务
+kube-apiserver kube-controller-manager kube-scheduler 
+
+node上需要的服务
+kubelet kube-proxy
+######################
+
+
+
+6）创建一个rc文件
+
+vim mysql-rc.yaml   #内容如下,注意！空格！
+
+apiVersion: v1                #定义版本
+kind: ReplicationController    #副本控制器RC
+metadata:
+  name: mysql        #RC的名称，全局唯一
+spec:
+  replicas: 1      #Pod副本的期待数量，如果是10 即为10个pod 最终会形成一个service
+  selector:           #标签
+    app: mysql       #符合目标的Pod拥有此标签，标签名
+  template:       #根据此模板创建Pod的副本（实例）
+    metadata:
+      labels:
+        app: mysql        #Pod副本拥有的标签，对应RC的Selector
+    spec:
+      containers:            # Pod内容器的定义部分
+      - name: mysql            #容器的名称
+        image: mysql:5.6        #容器对应的Docker image
+        ports:
+        - containerPort: 3306      #容器应用监听的端口号
+        env:        #注入容器内的环境变量
+        - name: MYSQL_ROOT_PASSWORD    #定义mysql 密码
+          value: "123456"
+
+
+####################
+mysql-rc.yaml   这个rc里面的mysql的密码不能自定义，必须是‘123456’
+不然最后是访问 localhsot:30001/demo/ 会报密码错误
+####################
+
+kubectl create -f mysql-rc.yaml    #创建 rc 
+
+kubectl get rc     #查看rc 
+[root@hc_k8s ~]# kubectl get rc
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     1         1         0         2m
+
+kubectl get pods    #查看 pod
+[root@hc_k8s ~]# kubectl get pod
+NAME          READY     STATUS              RESTARTS   AGE
+mysql-bj3hr   0/1       ContainerCreating   0          3m
+
+
+他创建的时候做的事情是从docker 镜像里面下载到本机
+tail /var/log/messages 
+docker pull registry.access.redhat.com/rhel7/pod-infrastructure:latest
+docker pull mysql:5.6
+
+
+
+从官方的docker pull 下来的镜像   
+[root@hc_k8s ~]# docker images
+REPOSITORY                                            TAG                 IMAGE ID            CREATED             SIZE
+docker.io/mysql                                       5.6                 a46c2a2722b9        2 weeks ago         256 MB
+registry.access.redhat.com/rhel7/pod-infrastructure   latest              99965fb98423        13 months ago       209 MB
+
+
+   registry.access.redhat.com/rhel7/pod-infrastructure 
+
+#这个是kubernetes 官方的pod ，必须要有这个！
+
+   docker.io/mysql   
+#官方的mysql镜像
+
+
+当 get pod 为running 即可
+[root@hc_k8s ~]# kubectl get pod
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-bj3hr   1/1       Running   0          6m
+
+
+
+
+
+
+7）创建一个service文件
+vim mysql-svc.yaml
+apiVersion: v1    #定义版本
+kind: Service     #定义service
+metadata:  
+  name: mysql      #标签
+spec:
+  ports:
+    - port: 3306   #定义端口
+  selector:
+    app: mysql     
+
+
+
+kubectl create -f mysql-svc.yaml     #创建service
+kubectl get svc   #查看service
+
+[root@hc_k8s ~]# kubectl get svc
+NAME         CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+kubernetes   10.254.0.1       <none>        443/TCP    8m
+mysql        10.254.125.198   <none>        3306/TCP   11s
+
+
+创建成功
+mysql 的IP  10.254.125.198
+
+
+然后用客户端的mysql 去连接连接检测一下 是否正常
+yum -y install mysql
+  mysql -h 10.254.55.81 -u root -p'359171106'
+    show databases;
+
+
+8）创建web rc文件
+vim web-rc.yaml
+
+kind: ReplicationController
+metadata:
+  name: myweb
+spec:
+  replicas: 1
+  selector:
+    app: myweb
+  template:
+    metadata:
+      labels:
+        app: myweb
+    spec:
+      containers:
+        - name: myweb
+          image: kubeguide/tomcat-app:v1
+          ports:
+          - containerPort: 8080
+          env:
+          - name: MYSQL_SERVICE_HOST
+            value: '10.254.191.50'   #这里的IP需要通过kubectl get svc 查看mysql的cluster ip,最好有dns才能
+          - name: MYSQL_SERVICE_PORT
+            value: '3306'
+
+
+kubectl create -f web-rc.yaml    #创建web的rc 控制器
+ 
+
+[root@hc_k8s ~]# kubectl get pod
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-bj3hr   1/1       Running   0          47m
+myweb-w2qt5   1/1       Running   0          5m
+
+running了再去创建  service ！
+
+
+9）创建web svc文件 
+
+vim web-svc.yaml
+
+kind: Service
+metadata:
+  name: myweb
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      nodePort: 30001    #service 的访问端口，最低是30000端口开始
+  selector:
+    app: myweb
+
+
+kubectl create -f web-svc.yaml    #创建web的service 
+
+
+
+
+  
+10）访问，要打开Firewall的   forward
+iptables -P FORWARD ACCEPT
+curl 192.168.1.5:30001/demo/ 或浏览器
+
+
+
+
+
+
+--------------------------------------
+kubectl create -f mysql-rc.yaml
+
+kubectl get rc
+
+kubectl get pod
+
+kubectl create -f mysql-svc.yaml 
+
+kubectl get svc
+
+kubectl create -f web-rc.yaml
+
+kubectl get pod
+
+kubectl create -f web-svc.yaml
+
+
+
+
+
+问题
+https://blog.csdn.net/gezilan/article/details/80011905
+https://www.cnblogs.com/neutronman/p/8047547.html
+https://blog.csdn.net/d7185540/article/details/80868816
+
+
+
+
+
+
+docker 
+
+如果要删docker 镜像和容器的话 
+先
+docker rm -f 'ID'    先删除容器
+再
+docker rmi 'ID'     再删镜像
+
+查看
+docker ps --all   #容器
+docker images     #镜像
+
+
+
+kubectl delete – 通过文件名、控制台输入、资源名或者label selector删除资源。
+
+通过文件名、控制台输入、资源名或者label selector删除资源。
+
+通过文件名、控制台输入、资源名或者label selector删除资源。 接受JSON和YAML格式的描述文件。
+只能指定以下参数类型中的一种：文件名、资源类型和名称、资源类型和label selector。 注意：delete命令不检查资源版本，如果有人在你进行删除操作的同时进行更新操作，他所做的更新将随资源同时被删除。
+
+kubectl delete ([-f FILENAME] | TYPE [(NAME | -l label | --all)])
+
+# 通过pod.json文件中指定的资源类型和名称删除一个pod
+
+$ kubectl delete -f ./pod.json
+
+
+# 通过控制台输入的JSON所指定的资源类型和名称删除一个pod
+
+$ cat pod.json | kubectl delete -f -
+
+
+# 删除所有名为“baz”和“foo”的pod和service
+
+$ kubectl delete pod,service baz foo
+
+
+# 删除所有带有lable name=myLabel的pod和service
+
+$ kubectl delete pods,services -l name=myLabel
+
+# 删除UID为1234-56-7890-234234-456456的pod
+
+$ kubectl delete pod 1234-56-7890-234234-456456
+
+
+
+# 删除所有的pod
+
+$ kubectl delete pods --all
+
+
+ kubectl delete pods,service,rc --all
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+kubernetes     概念
+
+
+Master 中控中心
+Master是整个集群的控制中心，kubernetes的所有控制指令都是发给master，它负责具体的执行过程。一般我们会把master独立于一台物理机或者一台虚拟机，它的重要性不言而喻。
+
+master上有这些关键的进程：
+1. Kubernetes API Server（kube-apiserver)  #提供了HTTP Rest接口关键服务进程，是所有资源增、删、改、查等操作的唯一入口，也是集群控制的入口进程。
+2. Kubernetes Controller Manager(kube-controlker-manager)   #是所有资源对象的自动化控制中心，可以理解为资源对象的大总管。
+3. Kubernetes Scheduler(kube-scheduler)  #负责资源调度（pod调度）的进程，相当于公交公司的“调度室”。Scheduler 调度的
+4. etcd Server，kubernetes  #里所有资源对象的数据都是存储在etcd中的
+
+
+Node
+除了Master，Kubernetes集群中其他机器被称为Node，早期版本叫做Minion。node 里面有docker
+Node可以是物理机也可以是虚拟机，每个Node上会被分配一些工作负载（即，docker容器），当Node宕机后，其上面跑的应用会被转移到其他Node上。
+
+Node上有这些关键进程：
+kubelet：   负责Pod对应容器的创建、启停等任务，同时与Master节点密切协作，实现集群管理的基本功能。
+kube-proxy：   实现Kubernetes Service的通信与负载均衡机制的重要组件。proxy代理
+Docker Engine（docker）：   Docker引擎，负责本机容器的创建和管理。
+
+kubectl get nodes     #查看集群中有多少个node节点
+kubectl describe node <node name>    #查看Node的详细信息
+
+
+
+
+
+
+Pod
+查看pod命令：   kubectl get pods
+查看容器命令：  docker ps
+可以看到容器和pod是有对应关系的，在我们做过的实验中，每个pod对应两个容器，一个是Pause容器，一个是rc里面定义的容器（实际上，每个pod里可以有多个应用容器）。
+这个Pause容器叫做“根容器”，只有当Pause容器“死亡”才会认为该pod“死亡”。
+Pause容器的IP以及其挂载的Volume资源会共享给该pod下的其他容器。
+Pause容器  ：网络和数据的共享！
+
+pod定义示例：
+apiVersion: v1
+kind: pod
+metadata:
+  name: myweb
+  labels:
+    name: myweb
+spec:
+  containers:
+  - name: myweb
+    image: kubeguide/tomcat-app:v1
+    ports:
+    - containerPort: 8080
+    env:
+    - name: MYSQL_SERVICE_HOST
+      value: 'mysql'
+    - name: MYSQL_SERVICE_PORT
+      value: '3306'
+
+
+每个pod都可以对其能使用的服务器上的硬件资源进行限制（CPU、内存）。
+CPU限定的最小单位是1/1000个cpu，用m表示，如100m，就是0.1个cpu。
+内存限定的最小单位是字节，可以用Mi（兆） 表示，如128Mi就是128M。
+
+
+
+在kubernetes里，一个计算资源进行配额限定需要设定两个参数：
+1）requests：该资源的最小申请量。   #最小值
+2）Limits：该资源允许的最大使用量。 #最大值
+
+
+
+
+
+资源限定示例：
+spec:
+  containers:
+  - name: db
+    image: mysql
+    resources:
+      requests:            #限定最小值
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "128Mi"    #限定最大值
+        cpu: "500m"
+
+
+Label
+Label是一个键值对，其中键和值都由用户自定义，Label可以附加在各种资源对象上，如Node、Pod、Service、RC等。
+一个资源对象可以定义多个Label，同一个Label也可以被添加到任意数量的资源对象上。
+Label可以在定义对象时定义，也可以在对象创建完后动态添加或删除。
+
+
+Label示例：
+"release":"stable", "environment":"dev", "tier":"backend"等等。
+
+
+
+
+
+
+
+
+RC      replication controller
+RC是kubernetes中核心概念之一，简单说它定义了一个期望的场景，即声明某种pod的副本数量在任意时刻都符合某个预期值，RC定义了如下几个部分：
+1）pod期待的副本数
+2）用于筛选目标pod的Label Selector     #Selector下的app 
+3）创建pod副本的模板（template）
+
+RC一旦被提交到kubernetes集群后，Master节点上的Controller Manager组件就会接收到该通知，它会定期巡检集群中存活的pod，并确保pod数量符合RC的定义值。可以说通过RC，kubernetes实现了用户应用集群的高可用性，并且大大减少了管理员在传统IT环境中不得不做的诸多手工运维工作，比如编写主机监控脚本、应用监控脚本、故障恢复处理脚本等
+
+
+RC工作流程（假如，集群中有3个Node）：
+1）RC定义2个pod副本
+2）假设系统会在2个Node上（Node1和Node2）创建pod
+3）如果Node2上的pod（pod2）意外终止，这很有可能是因为Node2宕机
+4）则会创建一个新的pod，假设会在Node3上创建pod3，当然也有可能在Node1上创建pod3
+
+
+RC中动态修改pod副本数量：
+kubectl scale rc <rc name> --replicas=n
+
+
+实体操作
+
+[root@hc_k8s ~]# kubectl get rc                  #查看rc控制器
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     1         1         1         2d
+myweb     1         1         1         2d
+
+[root@hc_k8s ~]# kubectl get pod                    #查看pod数量，每个pod 的里面都会有一个 Pause。
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-5j3s1   1/1       Running   0          2d
+myweb-zbwx4   1/1       Running   0          2d
+[root@hc_k8s ~]# kubectl scale rc mysql --replicas=2     #动态增加pod的
+replicationcontroller "mysql" scaled                     #增加正常
+
+[root@hc_k8s ~]# kubectl get pod                     #查看新增的pod的
+NAME          READY     STATUS    RESTARTS   AGE
+mysql-5j3s1   1/1       Running   0          2d
+mysql-p4d2s   1/1       Running   0          2s
+myweb-zbwx4   1/1       Running   0          2d
+
+[root@hc_k8s ~]# kubectl get rc                  #rc控制器也能看到已经mysql 变成2了
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     2         2         2         2d
+myweb     1         1         1         2d
+               
+[root@hc_k8s ~]# docker ps |grep mysql      #也能从docker这容器看出来，有新增的docker
+b78fdf4d3d1e        mysql:5.6                                                    "docker-entrypoint..."   4 minutes ago       Up 4 minutes                            k8s_mysql.65db1e76_mysql-p4d2s_default_8069657c-ebd2-11e8-a8bf-525400082fe7_95712acb
+337c4d22787f        registry.access.redhat.com/rhel7/pod-infrastructure:latest   "/usr/bin/pod"           4 minutes ago       Up 4 minutes                            k8s_POD.1d520ba5_mysql-p4d2s_default_8069657c-ebd2-11e8-a8bf-525400082fe7_69725a7c
+f5f28d836e09        mysql:5.6                                                    "docker-entrypoint..."   2 days ago          Up 2 days                               k8s_mysql.65db1e76_mysql-5j3s1_default_35774ed3-e979-11e8-a8bf-525400082fe7_1512c7d5
+f0e36313faf7        registry.access.redhat.com/rhel7/pod-infrastructure:latest   "/usr/bin/pod"           2 days ago          Up 2 days                               k8s_POD.1d520ba5_mysql-5j3s1_default_35774ed3-e979-11e8-a8bf-525400082fe7_c0aa28ac
+
+
+
+
+
+
+
+利用动态修改pod的副本数，可以实现应用的动态升级（滚动升级）：
+1）以新版本的镜像定义新的RC，但pod要和旧版本保持一致（由Label决定）
+2）新版本每增加1个pod，旧版本就减少一个pod，始终保持固定的值     #增加一个新的减少一个旧的
+3）最终旧版本pod数为0，全部为新版本  
+
+
+删除RC
+kubectl delete rc <rc name>
+删除RC后，RC对应的pod也会被删除掉，但是service需要手动删除
+
+
+
+
+
+Deployment
+在1.2版本引入的概念，目的是为了解决pod编排问题，在内部使用了Replica Set，它和RC比较，相似度为90%以上，可以认为是RC的升级版。 
+跟RC比较，最大的一个特点是可以知道pod部署的进度。
+
+
+
+
+Deployment示例：
+vim fr-dp.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      tier: frontend
+    matchExpressions:
+      - {key: tier, operator: In, values: [frontend]}
+  template:
+    metadata:
+      labels:
+        app: app-demo
+        tier: frontend
+    spec:
+      containers:
+      - name: tomcat-demo
+        image: tomcat
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+
+
+
+
+kubectl create -f fr-dp.yaml  #创建deployment
+
+kubectl get deployment      #查看deployment
+ 
+
+kubectl describe pod  'NAME'   #查看pod的详情
+
+
+
+操作如下
+
+[root@hc_k8s ~]# vim fr-dp.yaml
+[root@hc_k8s ~]# kubectl create -f fr-dp.yaml 
+deployment "frontend" created
+[root@hc_k8s ~]# kubectl get deployment
+NAME       DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+frontend   1         1         1            0           15s
+[root@hc_k8s ~]# kubectl get rc
+NAME      DESIRED   CURRENT   READY     AGE
+mysql     2         2         2         3d
+myweb     1         1         1         2d
+[root@hc_k8s ~]# kubectl get pod
+NAME                       READY     STATUS              RESTARTS   AGE
+frontend-141477217-twk51   0/1       ContainerCreating   0          28s      
+mysql-5j3s1                1/1       Running             0          3d
+mysql-p4d2s                1/1       Running             0          19m
+myweb-zbwx4                1/1       Running             0          2d
+[root@hc_k8s ~]# kubectl describe pod frontend-141477217-twk51
+Name:		frontend-141477217-twk51
+Namespace:	default
+Node:		127.0.0.1/127.0.0.1
+Start Time:	Mon, 19 Nov 2018 16:29:07 +0800
+Labels:		app=app-demo
+		pod-template-hash=141477217
+		tier=frontend
+Status:		Pending
+IP:		
+Controllers:	ReplicaSet/frontend-141477217
+Containers:
+  tomcat-demo:
+    Container ID:		
+    Image:			tomcat
+    Image ID:			
+    Port:			8080/TCP
+    State:			Waiting
+      Reason:			ContainerCreating
+    Ready:			False
+    Restart Count:		0
+    Volume Mounts:		<none>
+    Environment Variables:	<none>
+Conditions:
+  Type		Status
+  Initialized 	True 
+  Ready 	False 
+  PodScheduled 	True 
+No volumes.
+QoS Class:	BestEffort
+Tolerations:	<none>
+Events:
+  FirstSeen	LastSeen	Count	From			SubObjectPath			Type		Reason			Message
+  ---------	--------	-----	----			-------------			--------	------			-------
+  2m		2m		1	{default-scheduler }					Normal		Scheduled		Successfully assigned frontend-141477217-twk51 to 127.0.0.1
+  2m		2m		1	{kubelet 127.0.0.1}					Warning		MissingClusterDNS	kubelet does not have ClusterDNS IP configured and cannot create Pod using "ClusterFirst" policy. Falling back to DNSDefault policy.
+  2m		2m		1	{kubelet 127.0.0.1}	spec.containers{tomcat-demo}	Normal		Pulling			pulling image "tomcat"
+
+#这里就能看到了 他在pull镜像
+
+#rc 和deployment都要
+
+
+
+
+
+
+
+
+HPA(Horizontail Pod Autoscaler)
+在1.1版本，kubernetes官方发布了HPA，实现pod的动态扩容、缩容，它属于一种kubernetes的资源对象。
+它通过追踪分析RC控制的所有目标pod的负载变化情况，来决定是否需要针对性地调整目标Pod的副本数，这是HPA的实现原理。
+
+pod负载度量指标：
+1）CpuUtilizationPercentage
+目标pod所有副本自身的cpu利用率平用均值。一个pod自身的cpu利用率＝该pod当前cpu的使用量／pod Request值。
+如果某一个时刻，CPUUtilizationPercentage的值超过了80%，则判定当前的pod已经不够支撑业务，需要增加pod。
+
+2）应用程序自定义的度量指标，比如服务每秒内的 请求数 （TPS 或 QPS）
+HPA示例：
+
+apiVerion: autosacling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+  namespace: default
+spec:
+  maxReplicas: 10     #范围值  1-10
+  minReplicas: 1
+  scaleTargetRef:
+    kind: Deployment
+    name: php-apache
+  targetCPUUtilizationPercentage: 90     #cpu 超过90% 即扩容
+
+
+说明：HPA控制的目标对象是一个名叫php-apache的Deployment里的pod副本，当cpu平均值超过90%时就会扩容，pod副本数控制范围是1－10.
+
+
+
+除了以上的xml文件定义HPA外，也可以用命令行的方式来定义：
+kubectl autoscale deployment php-apache --cpu-percent=90 --min=1 --max=10
+
+
+
+
+
+
+
+
+
+Service     #servier 由一组pod的组成
+Service是kubernetes中最核心的资源对象之一，Service可以理解成是微服务架构中的一个“微服务”，pod、RC、Deployment都是为Service提供嫁衣的。
+简单讲一个service本质上是一组pod组成的一个集群，前面我们说过service和pod之间是通过Label来串起来的，相同Service的pod的Label一样。
+同一个service下的所有pod是通过kube-proxy实现负载均衡，而每个service都会分配一个全局唯一的虚拟ip，也叫做cluster ip。
+在该service整个生命周期内，cluster ip是不会改变的，而在kubernetes中还有一个dns服务，它把service的name和cluster ip映射起来。
+
+cluster ip 	
+[root@hc_k8s ~]# kubectl get svc
+NAME         CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+kubernetes   10.254.0.1       <none>        443/TCP          3d
+mysql        10.254.58.94     <none>        3306/TCP         3d
+myweb        10.254.170.110   <nodes>       8080:30001/TCP   2d    #这个IP是映射出来的，可以使用的
+
+
+
+
+service示例:(文件名tomcat-service.yaml)
+vim fr-dp.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+  ports:
+    - port: 8080
+    selector:
+      tier: frontend
+
+
+kubectl create -f vim fr-dp.yaml
+kubectl get endpoints      //查看pod的IP地址以及端口
+
+[root@hc_k8s k8s]# kubectl get endpoints
+NAME         ENDPOINTS          AGE
+kubernetes   192.168.1.5:6443   1h
+mysql        172.17.0.2:3306    1h
+myweb        172.17.0.3:8080    1h         #这个pod的IP是容器内的IP
+
+
+kubectl get svc tomcat-service -o yaml    //查看service分配的cluster ip
+-o  : 指定格式输出
+
+
+输出如下
+[root@hc_k8s k8s]# kubectl get svc mysql -o yaml
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: 2018-11-16T08:31:31Z
+  name: mysql
+  namespace: default
+  resourceVersion: "887"
+  selfLink: /api/v1/namespaces/default/services/mysql
+  uid: 05218a93-e97a-11e8-a8bf-525400082fe7
+spec:
+  clusterIP: 10.254.58.94
+  ports:
+  - port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: mysql
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+
+
+
+
+
+
+多端口的service
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+ports:
+  - port: 8080          	#posts下面可以定义定义多端口
+    name: service-port
+  - port: 8005
+    name: shutdown-port
+  selector:
+    tier: frontend
+
+
+对于cluster ip有如下限制：
+1）Cluster ip无法被ping通，因为没有实体网络来响应   #  clusterIP: 10.254.58.94 ping不通的，可以Telnet
+2）Cluster ip和Service port组成了一个具体的通信端口，单独的Cluster ip不具备TCP/IP通信基础，它们属于一个封闭的空间。
+3）在kubernetes集群中，Node ip、pod ip、cluster ip之间的通信，采用的是kubernetes自己设计的一套编程方式的特殊路由规则。
+
+
+
+要想直接和service通信，需要一个Nodeport，在service的yaml文件中定义：
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-service
+spec:
+  ports:
+  - port: 8080
+    nodeport: 31002
+  selector:
+    tier: frontend  
+
+它实质上是把cluster ip的port映射到了node ip的nodeport上了，nodeport 端口必须大于30000
+
+
+
+
+
+
+
+
+
+
+
+Volume(存储卷)
+Volume是pod中能够被多个容器访问的共享目录，kubernetes中的volume和docker中的volume不一样，主要有以下几个方面：
+1）kubernetes的volume定义在pod上，然后被一个pod里的多个容器挂载到具体的目录下
+2）kubernetes的volume与pod生命周期相同，但与容器的生命周期没关系，当容器终止或者重启时，volume中的数据并不会丢失
+3）kubernetes支持多种类型的volume，如glusterfs，ceph等先进的分布式文件系统
+
+
+如何定义并使用volume呢？只需要在定义pod的yaml配置文件中指定volume相关配置即可：
+  template:
+    metadata:
+      labels:
+        app: app-demo
+        tier: frontend
+    spec:
+      volumes:
+        - name: datavol
+          emptyDir: {}
+      containers:
+      - name: tomcat-demo
+        image: tomcat
+        volumeMounts:
+          - mountPath: /mydata-data
+          name: datavol
+        imagePullPolicy: IfNotPresent
+
+说明: volume名字是datavol，类型是emptyDir，将volume挂载到容器的/mydata-data目录下
+
+
+
+volume的类型：
+
+1）emptyDir   #适合存放临时文件。
+是在pod分配到node时创建的，初始内容为空，不需要关心它将会在宿主机（node）上的哪个目录下，因为这是kubernetes自动分配的一个目录，当pod从node上移除，emptyDir上的数据也会消失。所以，这种类型的volume不适合存储永久数据，适合存放临时文件。
+
+2）hostPath    #这个类型适合一个node的情况，即为唯一的node才行，多个node 有多个目录
+hostPath指定宿主机（node）上的目录路径，然后pod里的容器挂载该共享目录。这样有一个问题，如果是多个node，虽然目录一样，但是数据不能做到一致，所以这个类型适合一个node的情况。
+
+
+
+配置示例：
+  volumes:
+    - name: "persistent-storage"
+      hostPath:         #适用于单节点存储
+        path: "/data"
+
+
+3）gcePersistentDisk
+使用Google公有云GCE提供的永久磁盘（PD）存储volume数据。毫无疑问，使用gcePersistentDisk的前提是kubernetes的node是基于GCE的。
+配置示例：
+volumes:
+- name: test-volume
+  gcePersistentDisk:
+    pdName: my-data-disk
+    fsType: ext4
+
+
+4）awsElasticBlockStore
+与GCE类似，该类型使用亚马逊公有云提供的EBS Volume存储数据，使用它的前提是Node必须是aws EC2。
+
+5）NFS
+使用NFS作为volume载体。
+
+
+示例：
+  volumes:
+    - name: "NFS"
+      NFS:
+        server: ip地址
+        path: "/"
+
+
+
+
+6）其他类型
+iscsi
+flocker
+glusterfs
+rbd
+gitRepo: 从git仓库clone一个git项目，以供pod使用
+secret: 用于为pod提供加密的信息
+
+
+
+
+persistent volume（PV）网络存储，
+PV可以理解成kubernetes集群中某个网络存储中对应的一块存储，它与volume类似，但有如下区别：
+1）PV只能是网络存储，不属于任何Node，但可以在每个Node上访问到
+2）PV并不是定义在pod上，而是独立于pod之外定义   #？？？？
+3）PV目前只有几种类型：GCE Persistent Disk、NFS、RBD、iSCSCI、AWS ElasticBlockStore、GlusterFS
+
+
+如下是NFS类型的PV定义：
+apiVersion: v1
+kind: PersistentVolume  #PV
+metadata:
+  name: pv0003
+spec:
+  capacity:
+    storage: 5Gi    #5G
+  accessModes:       #访问权限
+    - ReadWriteOnce   
+  nfs:       
+    path: /somepath      #nfs 对应目录
+    server: ip
+
+其中accessModes是一个重要的属性，目前有以下类型：
+ReadWriteOnce:    读写权限，并且只能被单个Node挂载
+ReadOnlyMany:     只读权限，允许被多个Node挂载
+ReadWriteMany：   读写权限，允许被多个Node挂载    #最大权限
+
+
+
+
+
+如果某个pod想申请某种条件的PV，首先需要定义一个PersistentVolumeClaim（PVC）对象：
+
+PVC的实例：
+
+kind: persistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: myclaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+
+然后在pod的vomume定义中引用上面的PVC：
+
+volumes:
+  - name: mypd
+    persistentVolumeClaim:
+      ClaimName: myclaim
+
+
+##先定义PV，然后PVC自动和PV关联，然后再pod或者rc 或者deployment里面再去引用这个PVC就可以了
+
+
+
+
+
+
+
+
+
+Namespace（命名空间）   #实现资源隔离。
+当kubernetes集群中存在多租户的情况下，就需要有一种机制实现每个租户的资源隔离。而namespace的目的就是为了实现资源隔离。
+
+kubectl get namespace //查看集群所有的namespace
+
+
+操作如下
+[root@hc_k8s ~]# kubectl get namespace
+NAME          STATUS    AGE
+default       Active    3d
+kube-system   Active    3d
+
+
+
+
+定义namespace：
+
+vim dev-namespace.yaml   #定义dev  namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+
+
+kubectl create -f dev-namespace.yaml //创建dev namespace然后再定义pod，再指定namespace
+
+
+
+vim busybox-pod.yaml      #定义pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox     #创建dev namespace然后再定义pod，再指定namespace
+  namespace: dev
+spec:
+  containers:
+  - image: busybox
+    command:
+      - sleep
+      - "500"
+    name: busybox
+
+
+查看某个namespace下的pod：
+
+kubectl get pod -n=dev 
+kubectl get pod --all-namespace
+kubectl get pod --namespace=dev
+
+
+
+操作如下：
+
+[root@hc_k8s ~]# vim dev-namespace.yaml
+[root@hc_k8s ~]# vim busybox-pod.yaml
+[root@hc_k8s ~]# kubectl create -f dev-namespace.yaml 
+namespace "dev" created
+[root@hc_k8s ~]# kubectl create -f busybox-pod.yaml 
+pod "busybox" created
+
+[root@hc_k8s ~]# kubectl get pod           #这样是查看不到的
+NAME                       READY     STATUS    RESTARTS   AGE
+frontend-141477217-twk51   1/1       Running   0          39m
+mysql-5j3s1                1/1       Running   0          3d
+mysql-p4d2s                1/1       Running   0          58m
+myweb-zbwx4                1/1       Running   0          3d
+[root@hc_k8s ~]# kubectl get pod --all-namespaces     #查看命令如下
+NAMESPACE   NAME                       READY     STATUS    RESTARTS   AGE
+default     frontend-141477217-twk51   1/1       Running   0          39m
+default     mysql-5j3s1                1/1       Running   0          3d
+default     mysql-p4d2s                1/1       Running   0          58m
+default     myweb-zbwx4                1/1       Running   0          3d
+dev         busybox                    1/1       Running   0          18s
+[root@hc_k8s ~]# kubectl get pod -n dev                #这样也行
+NAME      READY     STATUS    RESTARTS   AGE
+busybox   1/1       Running   0          24s
+[root@hc_k8s ~]# kubectl get pod --namespace=dev      #还有这样
+NAME      READY     STATUS    RESTARTS   AGE
+busybox   1/1       Running   0          38s
+
+
+
+
+
+
+
+
+
+
+
+
+总结一下：
+master    控制中心，物理层次上划分两个角色，一个是master和node
+
+master包含了4个服务或是进程，Kubernetes API Server，Kubernetes Controller Manager，Kubernetes Scheduler，etcd Server
+
+1. Kubernetes API Server（kube-apiserver)  #提供了HTTP Rest接口关键服务进程，是所有资源增、删、改、查等操作的唯一入口，也是集群控制的入口进程。
+2. Kubernetes Controller Manager(kube-controlker-manager)   #是所有资源对象的自动化控制中心，可以理解为资源对象的大总管。
+3. Kubernetes Scheduler(kube-scheduler)  #负责资源调度（pod调度）的进程，相当于公交公司的“调度室”。Scheduler 调度的
+4. etcd Server，kubernetes   #里所有资源对象的数据都是存储在etcd中的
+
+
+pod的和pace
+
+
+Label 是用于关联pod和service的
+
+
+rc  用来定义 pod的环境 场景
+
+deployment  是rc 的升级版，可以查看到pod定义的进度，rc 看不了
+
+
+HPA   是一个实现动态扩容缩容资源对象
+
+service  提供给用户最终的服务
+
+volume 存储卷
+
+PV 定义存储卷的
+PVC 来自动关联PV，必须一起用
+
+namespace  多租户的时候的隔离机制
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+kubectl 命令使用
+
+
+
+语法：
+kubectl [command] [TYPE] [NAME] [flags]
+1 command：子命令，用于操作Kubernetes集群资源对象的命令，如create, delete, describe, get, apply等
+2 TYPE：资源对象的类型，如pod, service, rc, deployment, node等，可以单数、复数以及简写（pod, pods, po/service,services, svc
+3 NAME：资源对象的名称，不指定则返回所有，如get pod 会返回所有pod， get pod nginx， 只返回nginx这个pod
+4 flags：kubectl子命令的可选参数，例如-n 指定namespace，-s 指定apiserver的URL
+
+
+
+资源对象类型列表
+可以用这个命令获取到：
+ kubectl explain
+或
+ kubectl api-resources
+
+
+名称                              简写
+componentsstatuses                cs
+
+daemonsets                        ds
+
+deployment                        deploy
+
+events                            ev       #kubernetes的事件
+
+endpoints                         ep      
+
+horizontalpodautoscalers          hpa
+
+ingresses                         ing      
+
+jobs
+
+limitranges                       limits
+
+nodes                             no
+
+namspaces                         ns
+
+pods                              po
+
+persistentvolumes                 pv
+
+persistentvolumeclaims            pvc
+
+resourcequotas                    quota
+
+replicationcontrollers            rc
+
+secrets
+
+serviceaccounts                   sa
+
+services                          svc
+
+
+
+
+特殊用法：
+kubectl get pods pod1 pod2
+kubectl get pod/pod1 rc/rc1
+kubectl create -f pod1.yaml -f rc1.yaml -f service1.yaml   #同时创建多个，加 -f
+
+
+
+
+
+
+
+kubectl子命令
+主要包括对资源的创建、删除、查看、修改、配置、运行等
+
+kubectl --help 可以查看所有子命令
+
+kubectl参数
+kubectl options 可以查看支持的参数，例如--namespace指定所在namespace
+
+kubectl输出格式
+kubectl命令可以用多种格式对结果进行显示，输出格式通过-o参数指定：
+-o支持的格式有
+
+
+
+
+输出格式                          说明
+custom-columns=<spec>            根据自定义列名进行输出，逗号分隔
+
+custom-columns-file=<filename>   从文件中获取自定义列名进行输出
+
+json                             以JSON格式显示结果  
+
+jsonpath=<template>              输出jasonpath表达式定义的字段信息
+
+jasonpath-file=<filename>        输出jsonpath表达式定义的字段信息，来源于文件
+
+name                             仅输出资源对象的名称
+
+wide                             输出更多信息，比如会输出node名
+
+yaml                             以yaml格式输出
+
+
+举例：
+kubectl get pod -o wide
+kubectl get pod -o yaml
+kubectl get pod -o custom-columns=NAME:.metadata.name,RESC:.metadata.resourceVersion
+kubectl get pod --sort-by=.metadata.name    //按name排序
+
+
+
+
+
+
+kubectl命令示例：  
+1）创建资源对象    create
+根据yaml文件创建service和deployment
+kubectl create -f my-service.yaml -f my-deploy.yaml
+
+也可以指定一个目录，这样可以一次性根据该目录下所有yaml或json文件定义资源
+kubectl create -f <directory>
+
+
+
+
+
+2）查看资源对象   pod
+查看所有pod
+kubectl get pods
+
+查看deployment和service
+kubectl get deploy,svc
+
+   
+3）描述资源对象   describe
+显示node的详细信息
+kubectl describe nodes <node-name>
+
+显示pod的详细信息        指定的pod
+kubectl describe pods/<pod-name>
+
+显示deployment管理的pod信息
+kubectl describe pods <deployment-name>
+
+
+
+4）删除资源对象   delete  -f 
+基于yaml文件删除
+kubectl delete -f pod.yaml
+
+删除所有包含某个label的pod和service    -l 指定lable
+kubectl delete po,svc -l name=<lable-name>
+#kubectl delete po,svc -l app=mysql
+
+
+删除所有pod
+kubectl delete po --all
+
+ kubectl delete pods,service,rc --all    #全部干掉
+
+##视频中的不能删掉的pods，是因为，在以前的配置文件中定义过pods的最小个数和最大个数，所以删除不掉。
+
+
+
+5）执行容器的命令
+在pod中执行某个命令，如date
+kubectl exec <pod-name> date //pod-name如果不加，默认会选择第一个pod
+
+指定pod的某个容器执行命令
+kubectl exec <pod-name> date
+
+进入到pod的容器里，和docker命令差不多  pod-name == dockerID
+kubectl exec -it <pod-name> bash
+
+6）查看容器日志
+kubectl ner-name>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+kubernetes集群构建 - new
+
+
+
+软硬件限制：
+1）cpu和内存 master：至少1c2g，推荐2c4g；node：至少1c2g
+2）linux系统 内核版本至少3.10，推荐CentOS7/RHEL7
+3）docker 至少1.9版本，推荐1.12+
+4）etcd 至少2.0版本，推荐3.0+
+
+kubernetes官方github地址 https://github.com/kubernetes/kubernetes/releases
+
+高可用集群所需节点规划：
+部署节点------x1 : 运行这份 ansible 脚本的节点
+
+etcd节点------x3 : 注意etcd集群必须是1,3,5,7...奇数个节点
+
+master节点----x2 : 根据实际集群规模可以增加节点数，需要额外规划一个master VIP(虚地址)
+
+lb节点--------x2 : 负载均衡节点两个，安装 haproxy+keepalived
+
+node节点------x3 : 真正应用负载的节点，根据需要提升机器配置和增加节点数
+
+
+
+机器规划：
+
+ip 主机名角色
+192.168.1.211     hc_master_1    deploy、master1、lb1、etcd
+192.168.1.212     hc_node_1      etcd、node
+192.168.1.213     hc_node_2      etcd、node
+192.168.1.214     hc_master_2    master2、lb2
+192.168.1.215     vip
+
+
+
+准备工作
+四台机器，全部执行：
+yum install epel-release
+yum update -y
+yum install python     #为了使用ansible 自动部署
+  
+
+
+deploy节点  192.168.1.211   安装和准备ansible
+
+yum install -y python-pip git
+pip install pip --upgrade -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+pip install --no-cache-dir ansible -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+
+
+
+
+deploy节点配置免密码登录     192.168.1.211
+1）ssh-keygen 生产密钥  # ssh-keygen -t rsa
+2）for ip in 211 212 213 214; do ssh-copy-id 172.7.15.$ip; done   #把公钥传到其他机器上去
+
+
+
+deploy上编排k8s      192.168.1.211
+git clone https://github.com/gjmzj/kubeasz.git
+mkdir -p /etc/ansible
+mv kubeasz/* /etc/ansible/
+
+
+
+从百度云网盘下载二进制文件 https://pan.baidu.com/s/1c4RFaA#list/path=%2F
+可以根据自己所需版本，下载对应的tar包，这里我下载1.11
+
+经过一番折腾，最终把k8s.1-11-2.tar.gz的tar包放到了depoly上
+tar zxvf k8s.1-11-2.tar.gz
+mv bin/* /etc/ansible/bin/
+
+
+
+
+
+
+
+配置集群参数
+cd /etc/ansible/
+cp example/hosts.m-masters.example hosts //根据实际情况修改IP地址
+
+vim hosts
+######################################################################
+[deploy]
+192.168.1.211 NTP_ENABLED=no
+
+[etcd]
+192.168.1.211 NODE_NAME=etcd1
+192.168.1.212 NODE_NAME=etcd2
+192.168.1.213 NODE_NAME=etcd3
+
+[kube-master]
+192.168.1.211
+192.168.1.214
+
+[lb]
+192.168.1.211 LB_IF="eno16777736" LB_ROLE=backup # 注意根据实际使用网卡设置 LB_IF变量
+192.168.1.214 LB_IF="ens33" LB_ROLE=master
+
+[kube-node]
+192.168.1.212  (114)
+192.168.1.213  (115)
+
+
+[harbor]   #手动配置
+
+[new-master]    #新增主节点
+[new-node]      #新增分节点
+
+K8S_VER="v1.11"    #设置K8S版本
+
+
+
+这些是k8s 设置的内网网段，有需要可以自己设置
+# Network plugins supported: calico, flannel, kube-router, cilium
+CLUSTER_NETWORK="flannel"
+
+# K8S Service CIDR, not overlap with node(host) networking
+SERVICE_CIDR="10.68.0.0/16"
+
+# Cluster CIDR (Pod CIDR), not overlap with node(host) networking
+CLUSTER_CIDR="172.20.0.0/16"
+
+
+
+这是初始账号密码
+# Basic auth for apiserver
+BASIC_AUTH_USER="admin"
+BASIC_AUTH_PASS="test1234"
+
+
+
+CA相关的目录
+# CA and other components cert/key Directory
+ca_dir="/etc/kubernetes/ssl"
+
+可执行文件的路径
+# Binaries Directory
+bin_dir="/opt/kube/bin"
+
+#######################################################################
+
+
+
+修改完hosts，测试
+ansible all -m ping
+
+
+
+
+分步骤安装：
+1）创建证书和安装准备    CRT文件 和key文件
+ansible-playbook 01.prepare.yml
+
+
+2）安装etcd集群      #因为通信走的是HTTPS 需要证书的支持
+ansible-playbook 02.etcd.yml
+
+[root@hc_master_1 ansible]# bash     #刷新一下
+
+检查etcd节点健康状况：
+
+
+etcd 验证！
+
+for ip in 211 212 213 
+  do 
+     ETCDCTL_API=3 etcdctl 
+     --endpoints=https://192.168.1.$ip:2379 
+     --cacert=/etc/kubernetes/ssl/ca.pem 
+     --cert=/etc/etcd/ssl/etcd.pem 
+     --key=/etc/etcd/ssl/etcd-key.pem 
+     endpoint healt
+  done
+
+
+测试正常
+https://192.168.1.211:2379 is healthy: successfully committed proposal: took = 3.172885ms
+https://192.168.1.212:2379 is healthy: successfully committed proposal: took = 2.390089ms
+https://192.168.1.213:2379 is healthy: successfully committed proposal: took = 2.906073ms
+
+
+--------------
+
+3）安装docker
+ansible-playbook 03.docker.yml
+
+
+4）安装master节点
+ansible-playbook 04.kube-master.yml
+
+kubectl get componentstatus //查看集群状态
+NAME STATUS MESSAGE ERROR
+scheduler Healthy ok
+controller-manager Healthy ok
+etcd-1 Healthy {"health":"true"}
+etcd-2 Healthy {"health":"true"}
+etcd-0 Healthy {"health":"true"}
+
+---------------------------------
+[root@hc_master_1 ansible]# kubectl get componentstatus
+NAME                 STATUS    MESSAGE             ERROR
+controller-manager   Healthy   ok                  
+scheduler            Healthy   ok                  
+etcd-0               Healthy   {"health":"true"}   
+etcd-2               Healthy   {"health":"true"}   
+etcd-1               Healthy   {"health":"true"}   
+
+
+
+
+
+
+
+
+5）安装node节点
+ansible-playbook 05.kube-node.yml
+查看node节点
+kubectl get nodes
+
+
+[root@hc_master_1 ansible]# kubectl get nodes
+NAME            STATUS                     ROLES     AGE       VERSION
+192.168.1.211   Ready,SchedulingDisabled   master    10m       v1.11.3
+192.168.1.212   Ready                      node      1m        v1.11.3
+192.168.1.213   Ready                      node      1m        v1.11.3
+192.168.1.214   Ready,SchedulingDisabled   master    10m       v1.11.3
+
+
+
+
+
+
+
+
+
+
+6）部署集群网络
+ansible-playbook 06.network.yml     ##搭建内部网络组建
+kubectl get pod -n kube-system //查看kube-system namespace上的pod，从中可以看到flannel相关的pod
+
+
+[root@hc_master_1 ansible]# kubectl get pod -n kube-system
+NAME                    READY     STATUS    RESTARTS   AGE
+kube-flannel-ds-8g825   1/1       Running   0          1m
+kube-flannel-ds-k8r6f   1/1       Running   0          1m
+kube-flannel-ds-ldllm   1/1       Running   0          1m
+kube-flannel-ds-mtbvz   1/1       Running   0          1m
+
+
+
+
+
+7）安装集群插件(dns, dashboard) # dashboard 浏览器上的图形
+ansible-playbook 07.cluster-addon.yml
+
+查看kube-system namespace下的服务
+kubectl get svc -n kube-system         #  -n 指定 kube-system 
+
+[root@hc_master_1 ansible]# kubectl get svc -n kube-system
+NAME                   TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)         AGE
+kube-dns               ClusterIP   10.68.0.2       <none>        53/UDP,53/TCP   38s
+kubernetes-dashboard   NodePort    10.68.65.21     <none>        443:32513/TCP   19s
+metrics-server         ClusterIP   10.68.224.104   <none>        443/TCP         32s
+
+
+
+
+
+-----------------------------------------
+# 一步安装
+ansible-playbook 90.setup.yml
+ 上面的1-7步 ，一键安装
+-----------------------------------------
+
+
+
+
+
+
+
+
+查看集群信息：
+kubectl cluster-info
+
+[root@hc_master_1 ansible]# kubectl cluster-info
+Kubernetes master is running at https://192.168.1.10:8443
+CoreDNS is running at https://192.168.1.10:8443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+kubernetes-dashboard is running at https://192.168.1.10:8443/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+
+
+
+
+查看node/pod使用资源情况：
+kubectl top node
+
+[root@hc_master_1 ansible]# kubectl top node
+NAME            CPU(cores)   CPU%      MEMORY(bytes)   MEMORY%   
+192.168.1.211   112m         5%        2287Mi          62%       
+192.168.1.212   79m          3%        1106Mi          29%       
+192.168.1.213   81m          4%        1052Mi          28%       
+192.168.1.214   133m         6%        1766Mi          47%    
+
+
+
+
+kubectl top pod --all-namespaces
+
+[root@hc_master_1 ansible]# kubectl top pod --all-namespaces
+NAMESPACE     NAME                                    CPU(cores)   MEMORY(bytes)   
+kube-system   coredns-5ccb5b96d9-5wt2s                3m           11Mi            
+kube-system   coredns-5ccb5b96d9-vxxfx                3m           11Mi            
+kube-system   kube-flannel-ds-8g825                   3m           11Mi            
+kube-system   kube-flannel-ds-k8r6f                   3m           9Mi             
+kube-system   kube-flannel-ds-ldllm                   3m           9Mi             
+kube-system   kube-flannel-ds-mtbvz                   3m           14Mi            
+kube-system   kubernetes-dashboard-68bf55748d-lskdw   1m           6Mi             
+kube-system   metrics-server-75df6ff86f-5lcs5         1m           12Mi  
+
+
+
+
+测试DNS
+	
+a）创建nginx service 
+kubectl run nginx --image=nginx --expose --port=80
+
+kubectl run mysql --image=mysql:5.6 --expose --port=3306
+
+
+
+[root@hc_master_1 ansible]# kubectl run nginx --image=nginx --expose --port=80
+service/nginx created
+deployment.apps/nginx created
+
+
+
+
+kubectl describe pod nginx-6f858d4d45-8v995
+
+Events:
+  Type    Reason     Age   From                    Message
+  ----    ------     ----  ----                    -------
+  Normal  Scheduled  2m    default-scheduler       Successfully assigned default/nginx-6f858d4d45-8v995 to 192.168.1.213
+  Normal  Pulling    1m    kubelet, 192.168.1.213  pulling image "nginx"
+  Normal  Pulled     50s   kubelet, 192.168.1.213  Successfully pulled image "nginx"
+  Normal  Created    50s   kubelet, 192.168.1.213  Created container
+  Normal  Started    50s   kubelet, 192.168.1.213  Started container
+
+
+
+
+b）创建busybox 测试pod
+kubectl run busybox --rm -it --image=busybox /bin/sh //启动并进入到busybox内部
+          --rm ：当退出容器时，自动销毁
+
+验证 DNS 的功能
+nslookup nginx.default.svc.cluster.local //结果如下
+Server: 10.68.0.2
+Address: 10.68.0.2:53
+Name: nginx.default.svc.cluster.local
+Address: 10.68.9.156       #有这个就可以了
+
+
+自己机器的执行结果：
+[root@hc_master_1 ansible]# kubectl run busybox --rm -it --image=busybox /bin/sh
+
+If you don't see a command prompt, try pressing enter.
+
+/ #   nslookup nginx.default.svc.cluster.local
+Server:		10.68.0.2      #kube-dns 
+Address:	10.68.0.2:53
+
+Name:	nginx.default.svc.cluster.local
+Address: 10.68.55.130
+
+*** Can't find nginx.default.svc.cluster.local: No answer
+
+
+
+[root@hc_master_1 ansible]# kubectl get svc --all-namespaces 
+NAMESPACE     NAME                   TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)         AGE
+default       kubernetes             ClusterIP   10.68.0.1       <none>        443/TCP         31m
+default       nginx                  ClusterIP   10.68.55.130    <none>        80/TCP          10m
+kube-system   kube-dns               ClusterIP   10.68.0.2       <none>        53/UDP,53/TCP   14m
+kube-system   kubernetes-dashboard   NodePort    10.68.65.21     <none>        443:32513/TCP   14m
+kube-system   metrics-server         ClusterIP   10.68.224.104   <none>        443/TCP         14m
+
+
+
+
+
+
+
+
+
+
+
+增加node节点
+1）deploy节点免密码登录node
+  ssh-copy-id 新node ip
+
+
+2）修改/etc/ansible/hosts
+[new-node]
+172.7.15.117
+
+
+
+3）执行安装脚本
+ansible-playbook /etc/ansible/20.addnode.yml
+
+
+4）验证
+kubectl get node
+kubectl get pod -n kube-system -o wide
+
+
+5）后续工作
+修改/etc/ansible/hosts，将new-node里面的所有ip全部移动到kube-node组里去
+增加master节点（略）  参考以下链接：
+https://github.com/gjmzj/kubeasz/blob/master/docs/op/AddMaster.md
+
+
+
+
+升级集群
+1）备份etcd
+ETCDCTL_API=3 etcdctl snapshot save backup.db
+查看备份文件信息
+ETCDCTL_API=3 etcdctl --write-out=table snapshot status backup.db
+
+2）到本项目的根目录kubeasz
+cd /dir/to/kubeasz
+拉取最新的代码
+git pull origin master
+
+
+3）下载升级目标版本的kubernetes二进制包（百度网盘https://pan.baidu.com/s/1c4RFaA#list/path=%2F）解压，并替换/etc/ansible/bin/下的二进制文件
+
+4）docker升级（略），除非特别需要，否则不建议频繁升级docker！
+
+
+5）如果接受业务中断，执行：
+ansible-playbook -t upgrade_k8s,restart_dockerd 22.upgrade.yml
+
+
+
+6）不能接受短暂中断，需要这样做：
+a）ansible-playbook -t upgrade_k8s 22.upgrade.yml
+
+b）到所有node上逐一：
+kubectl cordon和kubectl drain  # //迁移业务pod
+
+systemctl restart docker
+kubectl uncordon             #/恢复pod
+
+
+
+
+
+mysql create
+[root@hc_master_1 ansible]# kubectl run mysql --image=mysql --expose --port=3306
+service/mysql created
+deployment.apps/mysql created
+
+
+备份和恢复
+
+1）备份恢复原理：
+备份，从运行的etcd集群中备份数据到磁盘文件
+恢复，把etcd的备份文件恢复到etcd集群中，然后据此重建整个集群
+
+2）如果使用kubeasz项目创建的集群，除了备份etcd数据外，还需要备份CA证书文件，以及ansible的hosts文件
+
+
+3）手动操作步骤：
+1. mkdir -p /backup/k8s      #创建备份目录
+2. ETCDCTL_API=3 etcdctl snapshot save /backup/k8s/snapshot.db    ##备份etcd数据
+3. cp /etc/kubernetes/ssl/ca* /backup/k8s/                         #备份ca证书
+4. deploy节点执行 ansible-playbook /etc/ansible/99.clean.yml      ##模拟集群崩溃
+
+
+
+
+
+kubectl get pod -o wide    查找它在哪台机器上
+[root@hc_master_1 ansible]# kubectl get pod -o wide
+NAME                     READY     STATUS    RESTARTS   AGE       IP           NODE            NOMINATED NODE
+mysql-665554f76b-b2rnj   0/1       Error     3          2m        172.20.3.6   192.168.1.212   <none>
+nginx-6f858d4d45-l49d9   1/1       Running   0          2m        172.20.2.6   192.168.1.213   <none>
+
+
+
+
+
+
+
+
+恢复步骤
+恢复步骤如下（在deploy节点）：
+1）恢复ca证书
+mkdir -p /etc/kubernetes/ssl
+cp /backup/k8s/ca* /etc/kubernetes/ssl/
+
+2）重建集群
+cd /etc/ansible
+ansible-playbook 01.prepare.yml
+ansible-playbook 02.etcd.yml
+ansible-playbook 03.docker.yml
+ansible-playbook 04.kube-master.yml
+ansible-playbook 05.kube-node.yml
+
+#这5步的恢复完后 是没有刚创建的mysql 和nginx的
+
+检查操作如下：
+[root@hc_master_1 ansible]# kubectl get pod
+No resources found.
+[root@hc_master_1 ansible]# kubectl get deployment
+No resources found.
+[root@hc_master_1 ansible]# kubectl get svc
+NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+kubernetes   ClusterIP   10.68.0.1    <none>        443/TCP   4m
+
+
+#查看集群信息是否健康
+[root@hc_master_1 ansible]# kubectl cluster-info 
+Kubernetes master is running at https://192.168.1.10:8443
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+
+
+
+
+
+
+3）恢复etcd数据
+  停止服务
+ansible etcd -m service -a 'name=etcd state=stopped'
+ 
+  清空文件
+ansible etcd -m file -a 'name=/var/lib/etcd/member/ state=absent'
+
+
+  登录所有的etcd节点，参照本etcd节点/etc/systemd/system/etcd.service的服务文件，替换如下{{}}中变量后执行
+cd /backup/k8s/
+
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db  --name etcd1  --initial-cluster etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 --initial-cluster-token etcd-cluster-0 --initial-advertise-peer-urls https://192.168.1.211:2380
+
+
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db  --name etcd2  --initial-cluster etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 --initial-cluster-token etcd-cluster-0 --initial-advertise-peer-urls https://192.168.1.212:2380
+
+
+
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db  --name etcd3  --initial-cluster etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 --initial-cluster-token etcd-cluster-0 --initial-advertise-peer-urls https://192.168.1.213:2380
+
+
+
+
+  执行上面的步骤后，会生成{{ NODE_NAME }}.etcd目录
+
+cp -r etcd1.etcd/member /var/lib/etcd/
+
+systemctl restart etcd      #重启这个文件
+
+
+
+#####################################################################################
+
+首先vim  /etc/systemd/system/etcd.service
+
+
+--initial-cluster=etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 
+etcd1=https://192.168.1.211:2380
+etcd2=https://192.168.1.212:2380
+etcd3=https://192.168.1.213:2380
+
+
+需要snapshot.db 这个文件
+rsync -av /backup/ 192.168.1.212:/backup/
+rsync -av /backup/ 192.168.1.213:/backup/
+
+
+需要修改 name 
+需要修改 --initial-advertise-peer-urls 的IP为当前node节点上的IP
+然后去各个节点上操作：
+master:
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db  --name etcd1  --initial-cluster etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 --initial-cluster-token etcd-cluster-0 --initial-advertise-peer-urls https://192.168.1.211:2380
+
+node1:
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db  --name etcd2  --initial-cluster etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 --initial-cluster-token etcd-cluster-0 --initial-advertise-peer-urls https://192.168.1.212:2380
+
+node2:
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db  --name etcd3  --initial-cluster etcd1=https://192.168.1.211:2380,etcd2=https://192.168.1.212:2380,etcd3=https://192.168.1.213:2380 --initial-cluster-token etcd-cluster-0 --initial-advertise-peer-urls https://192.168.1.213:2380
+
+各个节点上操作
+
+cp -r cd /backup/k8s/etcd1.etcd/member /var/lib/etcd/
+
+systemctl restart etcd
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+4）在deploy节点重建网络
+ansible-playbook /etc/ansible/tools/change_k8s_network.yml
+
+
+5）不想手动恢复，可以用ansible自动恢复
+需要一键备份
+ansible-playbook /etc/ansible/23.backup.yml
+
+检查
+/etc/ansible/roles/cluster-backup/files目录下是否有文件
+
+tree /etc/ansible/roles/cluster-backup/files/ //如下
+├── ca # 集群CA 相关备份
+│ ├── ca-config.json
+│ ├── ca.csr
+│ ├── ca-csr.json
+│ ├── ca-key.pem
+│ └── ca.pem
+├── hosts             # ansible hosts备份
+│ ├── hosts          # 最近的备份
+│ └── hosts-201807231642
+├── readme.md
+└── snapshot           # etcd 数据备份
+├── snapshot-201807231642.db
+└── snapshot.db           # 最近的备份
+
+
+
+模拟故障：
+ansible-playbook /etc/ansible/99.clean.yml
+
+修改文件/etc/ansible/roles/cluster-restore/defaults/main.yml，指定要恢复的etcd快照备份，如果不修改就是最新的一次
+
+恢复操作：
+ansible-playbook /etc/ansible/24.restore.yml
+ansible-playbook /etc/ansible/tools/change_k8s_network.yml
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,536 @@
+虚拟化介绍
+
+ VMware Workstation就是虚拟化
+ 虚拟化简单讲，就是把一台物理计算机虚拟成多台逻辑计算机，每个逻辑计算机里面可以运行不同的操作系统，相互不受影响，这样就可以充分利用硬件资源
+ 关键词Hypervisor(VMM) 虚拟机管理器
+ 虚拟化技术分为全虚拟化和半虚拟化
+ 早期的CPU硬件不支持虚拟化，虚拟机上的操作系统（guestos）要想使用cpu资源，需要通过VMM来翻译指令，这个过程比较耗费资源，这种虚拟化技术叫做全虚拟化（VMware Workstation）
+ 半虚拟化技术通过修改guestos内核，让guestos可以直接使用CPU资源，而不需要翻译指令了，从而节省了资源，但修改内核比较鸡肋（XEN）
+ 后续cpu厂商直接支持虚拟化，不需要通过VMM翻译指令了，无所谓半虚拟化和全虚拟化
+ 参考 http://www.cnblogs.com/xusongwei/archive/2012/07/30/2615592.html  http://itoedr.lofter.com/post/1472ba_69c62fa
+
+
+
+
+
+
+
+
+
+常见虚拟化软件
+
+
+ VMware系列
+ VMware workstation、VMware vsphere（VMware esxi）、VMware Fusion（Mac） 
+ Xen 开源 半虚拟化
+ XenServer 商业，厂商Ctirx，基于Xen的
+ KVM 开源 基于linux内核模块
+ Hyper-V 商业，厂商微软
+ Openvz 开源  基于linux 虚拟机和宿主机共用一个内核
+ VirtualBox 开源  Sun公司开发  Oracle收购Sun
+ http://developer.huawei.com/ict/forum/thread-23385-1-1.html
+
+
+
+
+
+
+
+
+KVM介绍
+
+ KVM是以色列初创公司Qumranet开发，2008年9月RedHat公司收购了Qumranet
+ KVM是Linux内核的一个模块，它把Linux内核变成了一个Hypervisor
+ KVM是完全开源的，RedHat基于KVM的虚拟化解决方案叫做RHEV
+ KVM在Linux操作系统里面以进程的形式出现，由标准的Linux调度程序进行调度，这使得KVM能够使用Linux内核的已有功能
+ 只有一个KVM内核模块还不能实现虚拟化的全部功能，就好比操作系统只有内核还不能成为一个完整的操作系统一样
+ QEMU是一个开源的虚拟化软件，纯软件，可以虚拟化所以的硬件，性能不强
+ KVM基于QEMU开发了一个能够运行在用户空间的工具QEMU-KVM
+ 磁盘、网络设备等都是通过QEMU-KVM这个工具模拟出来的
+ KVM和QEMU-KVM通信是通过/dev/kvm实现的
+ libvirt是用来管理KVM虚拟机的API，其命令为virsh
+
+
+
+
+GuestOS      |     GuestOS
+Qemu-kvm     |     Qemu-kvm
+虚拟硬件           虚拟硬件
+-------------------------------
+linux内核  KVM模块  /dev/kvm
+--------------------------------
+硬件资源（CPU,内存，硬盘等）
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Centos7上安装KVM
+
+
+ 前提是CPU支持虚拟化
+ 虚拟机设置内存2G，增加一个50G的虚拟磁盘，处理器2核，虚拟化引擎两个虚拟化相关的选项打上对勾
+ 关闭iptables或者firewalld
+ 关闭selinux
+ 格式化新磁盘，挂载到/kvm_data
+ 下载一个centos7的镜像文件
+ 检查cpu参数是否支持虚拟化  
+ grep -Ei 'vmx|svm' /proc/cpuinfo        
+    #vmx   英特尔的CPU
+    #svm    AMD的CPU
+
+blkid  /dev/sdb  
+
+ 安装kvm
+
+ yum install -y  virt-*  libvirt  bridge-utils qemu-img
+
+
+
+
+
+
+
+配置网卡并安装centos7
+
+
+ 配置网卡，增加桥接网卡
+ 设置一个br0网卡，TYPE为Bridge，IP地址设置为ens33的ip
+vim /etc/sysconfig/network-scripts/ifcfg-br0
+
+DEVICE=br0      #模式
+NAME=br0        #网卡名
+HWADDR=C8:60:00:8E:6F:93   #硬件
+TYPE=Bridge          #类型是 桥接 Bridge
+ONBOOT=yes           #自启动开启
+NM_CONTROLLED=yes     
+BOOTPROTO=none      #静态
+IPADDR=192.168.1.9    
+NETMASK=255.255.255.0
+DNS1=119.29.29.29
+GATEWAY=192.168.1.1
+
+
+
+ ens33配置文件里把IP地址去掉，增加BRIDGE=br0
+
+vim /etc/sysconfig/network-scripts/ifcfg-eth0
+DEVICE=eth0
+NAME=eth0
+TYPE=Ethernet
+ONBOOT=yes
+BOOTPROTO=none
+BRIDGE=br0         #使用桥接模式
+
+
+
+
+ 检查 KVM模块 是否加载
+
+ lsmod|grep kvm
+
+[root@huidou02 network-scripts]#  lsmod|grep kvm
+kvm_intel              55432  0 
+kvm                   346318  1 kvm_intel
+
+
+
+
+ 启动libvirtd服务
+ systemctl start  libvirtd    、  service libvirtd start\stop
+
+
+
+ brctl show可以看到两个网卡br0和virbr0
+
+[root@huidou02 network-scripts]#  brctl show         
+bridge name	bridge id		STP enabled	interfaces
+br0		8000.c860008e6f93	no		eth0
+virbr0		8000.5254002484d0	yes		virbr0-nic
+
+br0     #桥接模式
+virbr0  #NAT模式
+
+
+
+
+ 命令行安装centos7   可支持热调整
+virt-install KVM安装命令
+ virt-install --name=hc --memory=1024,maxmemory=2048 --vcpus=1,maxvcpus=2 --os-type=linux --os-variant=rhel7 --location=/tmp/CentOS-7-x86_64-DVD-17081.iso --disk path=/kvm_data/aminglinux01.img,size=10 --bridge=br0 --graphics=none --console=pty,target_type=serial --extra-args="console=tty0 console=ttyS0"
+
+
+
+centos 6 系统上 安装KVM    virt-install
+安装命令：
+virt-install --name=hc -r 2048 --vcpus=1,maxvcpus=2 --os-type=linux --os-variant=rhel7 --location=/backup/CentOS-7-x86_64-DVD-1708.iso --disk path=/backup/kvm_data.img,size=10 --bridge=br0 --graphics=none --console=pty,target_type=serial --extra-args="console=tty0 console=ttyS0"
+
+
+
+
+
+######################################################
+yum 源   阿里云
+
+1）下载repo文件 
+wget http://mirrors.aliyun.com/repo/Centos-7.repo
+
+2）备份并替换系统的repo文件 
+cp Centos-7.repo /etc/yum.repo.d/ 
+cd /etc/yum.repos.d/ 
+mv CentOS-Base.repo CentOS-Base.repo.bak 
+mv Centos-7.repo CentOS-Base.repo
+
+3）执行yum源更新命令 
+yum clean all 
+yum makecache 
+yum update
+
+
+
+ yum -y install epel-release net-tools gcc-c++ 
+#########################################################
+
+
+
+--name    #机名字
+
+--memory=1024,maxmemory=2048    #定义内存，是1024 kb，最大是2048 kb 。 可支持热调整
+
+--vcpus=1,maxvcpus=2    #定义CPU核数和最大和数
+
+--os-type=linux     #系统类型是Linux 
+
+--os-variant=rhel7    #具体版本 RHEL 7   . centos7
+
+--location   #可以跟网络的资源IOS文件,也可以是本地路径的IOS文件
+
+--disk path  #虚拟硬盘路径和名字，size=10 大小    10G 
+
+--bridge=br0   #桥接模式的网络
+
+--graphics=none  #不开图形界面
+
+
+这个定义终端属性
+--console=pty,target_type=serial          
+--extra-args="console=tty0 console=ttyS0"
+
+#  ctrl + ]    退出当前系统
+
+
+
+
+
+
+
+
+
+
+
+虚拟机管理
+service libvirtd start\stop  启动服务或者关闭
+
+ 安全完虚拟机需要重启，要退出虚拟机使用快捷键ctrl ]，如果回车了，宿主机也重启了
+自动获取网卡 dhclient
+安装yum -y install net-tools
+
+ ps aux |grep kvm   ##查看kvm进程
+ virsh list         ##查看虚拟机列表，只能看到运行的虚拟机
+ virsh list --all   ##查看虚拟机列表，包括未运行的虚拟机
+ virsh console hc   ##进入指定虚拟机
+ virsh shutdown hc   ##关闭虚拟机 ,正常关机 
+ virsh start hc     ##开启虚拟机
+ virsh reboot hc    ##reboot system
+ virsh destroy hc    ##类似stop，这个是强制停止,强制关机
+ virsh undefine hc   ##彻底销毁虚拟机，会删除虚拟机配置文件,但是虚拟磁盘还在数据还在，virsh list --all就看不到了
+ ls /etc/libvirt/qemu/hc.xml     ##可以查看虚拟机配置文件,核心配置文件，最好做备份
+ virsh autostart hc           ##宿主机开机该虚拟机也开机
+ virsh autostart --disable hc   ##解除开机启动
+ virsh suspend hc   //挂起
+ virsh resume hc    //恢复
+
+
+
+
+
+
+
+
+
+克隆虚拟机
+
+ virsh shutdown hc
+ virt-clone  --original hc --name hc02 --file /backup/kvm_data/hc02.img
+ -clone       克隆
+ --original   指定克隆源虚拟机
+ --name       指定克隆后的虚拟机名字
+ --file       指定目标虚拟机的虚拟磁盘文件，就放到哪里去的路径
+ 如果 hc 虚拟机开机状态，则提示先关闭或者暂停虚拟机
+
+
+
+
+
+
+快照
+
+ 创建快照  virsh snapshot-create hc
+ raw   格式的虚拟磁盘    不支持做快照
+ qcow2 格式的虚拟磁盘    支持做快照
+ qemu-img info 查看虚拟硬盘格式
+ qemu-img info /backup/kvm_data/hc.img //查看hc.img信息，同时会查看到快照列表,里面的TAG信息是恢复快照的关键ID
+ virsh snapshot-list hc     //列出所有快照
+ virsh snapshot-current hc    //查看当前快照版本
+ ls /var/lib/libvirt/qemu/snapshot/hc02/1542014187.xml    //查看所有快照配置文件
+
+ virsh snapshot-revert hc  1513440854    //恢复指定快照
+ virsh snapshot-delete hc  1513440854   //删除快照
+
+
+
+
+
+
+
+磁盘格式
+
+ 虚拟磁盘常用格式 
+raw（读写性能好，定义多大磁盘空间就占用多大磁盘空间，不可做快照）
+qcow2（用多少磁盘空间就占用磁盘空间多少，可以做快照）
+
+ qemu-img info /backup/kvm_data/hc02.img    //查看虚拟磁盘格式
+
+ qemu-img create -f raw /backup/kvm_data/hc02_1.img 2G   //创建2G的raw格式磁盘
+
+
+ 把raw格式的磁盘转换为qcow2格式
+ qemu-img convert -O qcow2 /backup/kvm_data/hc02.img /backup/kvm_data/hc02.qcow2
+
+ ### qemu-img convert -O 指定格式  原路径  目标路径
+
+ 转换后用ls -lh查看磁盘文件的大小，可以看到qcow2文件比较小，raw文件大小和我们指定空间大小一样是2G
+raw（读写性能好，定义多大磁盘空间就占用多大磁盘空间，不可做快照）
+qcow2（用多少磁盘空间就占用磁盘空间多少，可以做快照）
+
+raw格式的磁盘性能比qcow2要好，但是raw格式的磁盘无法做快照
+
+ 给hc02转换为raw格式的磁盘
+ virsh shutdown hc02
+ qemu-img convert -O raw /kvm_data/hc02.img /kvm_data/hc02_3.raw
+
+ virsh edit hc02   //更改格式和文件路径。相当于visudo,  edit编辑配置文件，有自动检测的功能 
+ virsh start hc02   ##启动
+
+
+
+
+
+
+总结：
+
+1.先查看虚拟硬盘格式
+  qemu-img info /backup/kvm_data/hc02.img  ##后面跟配置文件xml路径
+
+2.将raw格式转换成qcow2格式 
+  qemu-img convert -O qcow2 /backup/kvm_data/hc02.img /backup/kvm_data/hc02.qcow2
+   ### qemu-img convert -O 指定格式  原路径  目标路径
+
+3.edit该配置文件，只需改变其路径格式
+  virsh edit hc02   
+    <disk type='file' device='disk'>
+       <driver name='qemu' type='qcow2' cache='none'/>
+       <source file='/backup/kvm_data/hc02.qcow2'/>
+
+4.做快照需要关机状态才可
+   virsh shutdown hc02
+
+5.创建快照
+   virsh snapshot-create hc02
+
+6.查看快照 #TAG 信息很重要，恢复快照时需要用到
+   virsh snapshot-list hc02
+      TAG               Creation Time             status
+      ------------------------------------------------------------
+      1542014187       2018-11-12 17:16:27 +0800  shutoff
+
+7.开机 完成快照 
+   virsh start hc02
+
+8.如需要恢复快照 TAG 信息很重要
+   virsh snapshot-revert hc02 1542014187
+   ### virsh snapshot-revert 目录名称 目录TAG
+
+
+
+
+
+
+
+
+
+
+
+磁盘扩容 – raw格式
+
+ qemu-img resize /backup/kvm_data/hc02.img +2G  #resize 扩容2G
+ qemu-img info /backup/kvm_data/hc02.img 
+ virsh destroy hc02    #必须回到宿主机，然后执行命令强制关机，才可生效
+ virsh start hc02       #启动
+ virsh console hc02     #进入
+
+   fdisk -l 查看磁盘情况，并分新的分区
+
+
+ 除了对已有磁盘扩容外，还可以额外增加磁盘
+ qemu-img create -f raw /backup/kvm_data/hc02.img 5G    #增加磁盘 5G
+ virsh edit aminglinux02      ##增加<disk>…</disk>，注意更改source、target、slot
+ virsh destroy aminglinux02    #强制关机
+ virsh start aminglinux02       #启动
+
+
+
+
+分区 ，格式化，挂载
+
+fdisk /dev/vdb
+n : 增加一个新的分区 p : 列出分区 w：保存分区 d：删除分区
+
+
+
+总结：
+1.增加磁盘，增加5G
+qemu-img create -f raw /backup/kvm_data/hc02_raw_1.img 5G     
+
+2.edit 编辑配置文件。需要更改source、target、slot
+ virsh edit hc02
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='raw' cache='none'/>   
+      <source file='/backup/kvm_data/hc02_raw.img'/>    
+      <target dev='vda' bus='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x0'/>
+    </disk>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='raw' cache='none'/>     
+      <source file='/backup/kvm_data/hc02_raw_1.img'/>   #修改 source
+      <target dev='vdb' bus='virtio'/>                  ##修改 target
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>   #修改 slot
+    </disk>
+
+3.重启虚拟机
+virsh destroy hc02
+virsh start hc02
+
+4.进入虚拟机并查看磁盘,分区 ，格式化，挂载
+virsh console hc02
+  fdisk -l    #查看分区
+
+  fdisk /dev/vdb1   # 分区
+     n : 增加一个新的分区 p : 列出分区 w：保存分区 d：删除分区 
+
+mkfs.ext4 /dev/vdb1    #格式化
+
+mount /dev/vdb1 /data   #挂载
+  
+
+
+
+
+
+
+
+
+
+磁盘扩容 – qcow2格式
+
+ qemu-img resize /kvm_data/hc.img +2G
+ 若提示qemu-img: Can't resize an image which has snapshots，需要删除快照
+ qemu-img info /kvm_data/aminglinux01.img 
+virsh snapshot-delete hc 1542014187     #删除快照   
+
+ virsh destroy   hc
+ virsh start   hc
+ virsh console hc
+ fdisk -l 查看磁盘情况，并分新的分区
+ 除了对已有磁盘扩容外，还可以额外增加磁盘
+ qemu-img create -f qcow2 /kvm_data/hc03_disk_qcow2.img 5G
+ virsh edit  hc //增加<disk>…</disk>，注意更改source、target、slot
+ virsh destroy hc
+ virsh start hc
+分区，格式化，挂载
+
+
+
+
+调整cpu、内存、网卡
+
+ virsh dominfo hc //查看配置   #通过配置文件修改
+ virsh edit hc//更改如下部分内容
+  <memory unit='KiB'>1048576</memory>
+  <currentMemory unit='KiB'>524288</currentMemory>
+  <vcpu placement='static' current='1'>2</vcpu>
+ virsh shutdown hc
+ virsh start hc
+
+动态调整
+ virsh setmem hc 800m     //动态调整内存 
+ virsh dumpxml hc > /etc/libvirt/qemu/hc01.xml    //需要把配置写入到配置文件里
+ virsh setvcpus hc 2    //动态调整cpu数量  #不能减小，只能增加
+ virsh domiflist hc     //查看网卡
+ virsh attach-interface hc --type bridge --source virbr0 //增加一块新的网卡，并设置为nat网络模式（virbr0类似vmware的vmnet8），这里如果写--source br0，则网络模式为桥接
+ virsh dumpxml hc > /etc/libvirt/qemu/hc01.xml  //需要把配置写入到配置文件里
+
+
+
+
+
+
+
+
+
+
+
+迁移虚拟机
+配置文件迁移
+该方式要确保虚拟机是关机状态
+ virsh shutdown hc
+ virsh dumpxml hc > /etc/libvirt/qemu/hc // 如果是远程机器，需要把该配置文件拷贝到远程机器上
+ virsh domblklist hc //查看虚拟机磁盘所在目录
+ rsync -av /kvm_data/hc.img  /kvm_data/hc.img //如果是迁移到远程，则需要把该磁盘文件拷贝到远程机器上
+ vi /etc/libvirt/qemu/hc03.xml //因为是迁移到本机，配置文件用的是hc子机的配置，不改会有冲突，所以需要修改该文件，如果是远程机器不用修改
+ 修改domname: <name>hc03</name>
+ 修改uuid（随便改一下数字，位数不要变）
+ 修改磁盘路径
+ virsh define /etc/libvirt/qemu/hc03.xml //定义新虚拟机
+ virsh list --all   //会发现新迁移的hc03子机
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

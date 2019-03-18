@@ -1,0 +1,337 @@
+jenkins
+
+ 官网 https://jenkins.io
+ Jenkins是一个开源的、可扩展的持续集成、交付、部署（软件/代码的编译、打包、部署）基于web界面的平台。
+ Jenkins是一个工具集，提供了各种各样的插件
+ 比如获取git上最新的代码
+ 比如可以帮你编译源代码
+ 比如可以调用自定义的shell脚本远程执行命令
+ 官方文档 https://jenkins.io/doc/
+
+
+
+Jenkins安装
+
+ 最低配置： 不少于256M内存，不低于1G磁盘，jdk版本>=8
+ 安装jdk1.8
+1. yum install -y java-1.8.0-openjdk
+2. wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat/jenkins.repo
+3. rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key   #需要一个jenkins的kye
+4. yum install -y jenkins
+5. systemctl start jenkins
+6. less /var/log/jenkins/jenkins.log //查询admin密码
+ 访问 http://ip:8080/ 进行安装    # 可以选择自动安装   或者  选择性插件安装
+
+密码存放在这  /var/lib/jenkins/secrets/initialAdminPassword     admin的password
+
+
+Jenkins相关目录
+
+ rpm -ql jenkins
+
+ 安装目录/var/lib/jenkins
+
+ 配置文件 /etc/sysconfig/jenkins
+
+ 日志目录 /var/log/jenkins
+
+
+
+
+
+
+
+
+
+
+Jenkins发布php代码
+
+“系统管理”“管理插件”“已安装”
+ 检查是否有“Git plugin”和“Publish Over SSH”两个插件，如果没有，则需点击“可选插件”，找到它并安装
+ 安装好两个插件后，点击“系统管理”“系统设置”
+ 下拉，找到“Publish Over SSH”
+ 事先在一台linux服务器上生成一对密钥
+ ssh-keygen -f /root/.ssh/jenkins //可以设置密码，也可不设置
+   #需要一个公钥，将私钥放入jenkins 的ssh 的key里就可以了
+ “Passphrase”填写设置的密码, “Path to key”留空，“key”粘贴/root/.ssh/jenkins文件内容
+ 点击左下角“增加”，SSH Server，
+  name自定义，
+  Hostname填写线上web服务器的ip，
+  Username填写root，
+  Remote Directory填写  / （根）
+ 如果是多台web server，继续点击“增加”，重复以上操作
+ 点左下角的“保存”
+
+
+
+
+
+ 点击“新建”，任务名称自定义，比如test，选择“构建一个自由风格的软件项目”点击下方的“确定”
+ 描述，自定义
+ “源码管理”选择 “Git”
+ “Repository URL”填写你项目的git地址，
+    如 # https://git.coding.net/aminglinux/aminglinux-book.git  
+
+私有库：
+ 如果是公共项目可以不设置下面的参数，直接填写一个git地址即可，若是私有项目，需要填写认证信息，比如可以选择 “SSH Username whith private key”，然后设置Username以及private key
+
+ “Branches to build” 默认为*/master，意思是发布的分支为master，保持默认
+
+ “构建触发器”和“构建环境”留空
+
+选框： add post-build action  “构建”
+选择 “Send files or execute commands over SSH” 
+ SSH Server，Name 选择对应的服务器，Transfers, Source files填写**/**，表示全部文件
+
+
+ Remove prefix     可以指定截掉的前缀目录，这里留空即可，
+ Remote directory  指定远程服务器上代码存放路径，
+   比如/data/wwwroot/www.aaa.com，
+ Exec command为文件传输完成后要执行的命令，比如可以是更改文件权限的命令，
+ 设置完成后点击“Add Transfer Set”，增加新的git
+         如果还有另外的机器，可以点击 “Add Server”重复以上操作
+
+ 最后点击左下角的“保存”
+ 完成以上操作后，就可以使用这个刚刚创建的任务去工作了。
+ 点击左面的“立即构建”，就能把git上的代码发布到指定的服务器上。
+ 点击左下角的#1/#2… ，然后再点击 “Console Output”可以查看输出日志
+
+
+
+
+
+
+
+
+Jenkins配置邮件 – 内置邮件##先设置系统管理员邮件地址，这里的邮件地址需要和后续要设置的发邮件地址一致。
+
+ 系统管理 -> 系统设置 -> Jenkins Location 先设置系统管理员邮件地址，这里的邮件地址需要和后续要设置的发邮件地址一致。
+ 往下拉，找到“邮件通知”那一栏
+ 填写SMTP服务器，点右侧的高级，打勾“使用SMTP认证”，
+  填写用户名，密码，如果使用的是ssl协议，还需要在这里打勾，
+  smtp端口默认为25
+ 可以打勾“通过发送测试邮件测试配置”，然后填写接收邮件的地址，点右侧的Test configuration
+ 然后就是到已经构建过的job里去配置接收邮件的地址了。在最下面“构建后操作”那一栏，找到E-mail Notification，Recipients填写收邮件人
+ ##########这个收件人只会在job构建 失败 时才能收到邮件
+
+
+
+
+
+
+
+
+Jenkins配置邮件 – 插件email-ext
+#成功与否 都发
+
+ 插件名字Email Extension Plugin，默认已经安装
+ 系统管理->系统设置->Extended E-mail Notification 
+ 填写SMTP server，
+ 点击Use SMTP Authentication，
+ 填写用户名、密码、
+ SMTP ，port等
+Default Triggers 到这里选择 Always #总是，不管成功与否 都要发！
+ 
+ 到自己的构建的里面去设置
+ 还需到对应构建任务中去配置一下，下拉到“构建后操作”
+ 点击“增加构建后操作步骤”，选择“Editable  Email Notification”,
+  其中Project Recipient List为接收邮件的收件人，可以在默认内容后面增加额外的收件人邮箱，用逗号分隔
+ 点击右下角的“Advanced settings”,
+  定位到“Triggers”， 
+    然后点击下方的“Add Trigger”，可以增加发邮件的条件。
+
+
+ 参考文章http://www.cnblogs.com/zz0412/p/jenkins_jj_01.html
+
+
+
+
+
+
+
+
+Jenkins破解管理员密码
+ cd /var/lib/jenkins/users/admin
+ vim config.xml//定位到<passwordHash>那一行
+ 删除改行，改为
+  <passwordHash>#jbcrypt:$2a$10$pre7I4liZFdF6ZE05QntTOoKoKa5pCUumaFO/mMzMoH09bNBzyj6O</passwordHash>
+ 重启一下jenkins
+ 新密码为aminglinux.com
+
+
+ <passwordHash>#jbcrypt:$2a$10$2edwHFYBionooH0oIscnyebwcZHtQQHOumgTS8XWaoWoxj5JBJevK</passwordHash>
+   密码为 359171106  
+
+
+
+
+
+
+
+
+
+Jenkins部署java项目
+ java的项目是需要编译和打包的
+ 编译和打包用maven完成，所以需安装maven
+ 本次实验，我们采用git私有仓库的形式，涉及到配置密钥
+
+在本地机器上配置 git   # yum -y install git
+1. git config --global user.name "Administrator"   #配置全局 ，设置用户
+2. git config --global user.email "admin@example.com" # 设置邮箱
+3. git clone git@gitee.com:hcbabab/test-java.git    #克隆项目到本地目录
+4. tuoch abc.java                # 创建文件
+5. git commit -m "new README.md"  #加载说明
+6. git push -u origin master     #推送分支
+
+
+ 准备工作：
+ 自己申请一个私有git仓库（coding.net/github.com/git.lishiming.net）
+ 生成密钥对
+ 把公钥放到git服务端
+ 下载zrlog的源码 https://codeload.github.com/94fzb/zrlog/zip/master 
+ 下载的文件为zip压缩文件，需要解压  yum -y install unzip
+ 然后用git push到新建的私有仓库里
+
+将你项目的文件放入 git 目录里去
+然后
+1。  git add .        #放入分支内
+2。  git commit -m "add newfile"   #加说明
+3.   git push    #推上去
+
+
+ 在另外一台机器上安装jdk + tomcat，其中jdk可以为openjdk，版本1.8
+ tomcat需要下载二进制包  
+ yum install -y java-1.8.0-openjdk    #tomcat 需要JDK的环境
+  wget https://mirrors.tuna.tsinghua.edu.cn/apache/tomcat/tomcat-8/v8.5.34/bin/apache-tomcat-8.5.34.tar.gz  
+ tar zxvf apache-tomcat
+ mv apache-tomcat-8.5.23 /usr/local/tomcat
+ vim /usr/local/tomcat/conf/tomcat-users.xml //增加如下内容
+<role rolename="admin"/>
+<role rolename="admin-gui"/>
+<role rolename="admin-script"/>
+<role rolename="manager"/>
+<role rolename="manager-gui"/>
+<role rolename="manager-script"/>
+<role rolename="manager-jmx"/>
+<role rolename="manager-status"/>
+<user name="admin" password="359171106" roles="admin,manager,admin-gui,admin-script,manager-gui,manager-script,manager-jmx,manager-status" />
+
+需要增加可以访问的网段
+vim /usr/local/tomcat/webapps/manager/META-INF/context.xml
+   allow="127\.\d+\.\d+\.\d+|::1|0:0:0:0:0:0:0:1|192.168.1.*" />   增加192.168.1.*   ，支持正则
+
+ 启动tomcat   ./startup.sh
+ 关闭        ./shutdown.sh
+
+
+
+ 安装maven    #一定要在 jenkins 服务器上安装
+
+ 下载地址  https://maven.apache.org/download.cgi
+ wget  http://mirror.bit.edu.cn/apache/maven/maven-3/3.6.0/binaries/apache-maven-3.6.0-bin.tar.gz
+ tar zxvf apache-maven-3.6.0-bin.tar.gz
+ mv apache-maven-3.6.0 /usr/local/
+ /usr/local/apache-maven-3.6.0/bin/mvn --version   #查看版本
+
+ jenkins -> 系统管理 -> 全局工具配置
+ Maven Configuration -> Settings file in filesystem -> File Path /usr/local/apache-maven-3.6.0/conf/settings.xml
+ Global settings file on filesystem -> File Path 同上
+ 下拉到Maven，Maven安装，Name（自定义，如maven3.5.2），MAVEN_HOME填 “/usr/local/apache-maven-3.6.0/” #该软件的目录
+ 左下角“save”
+
+
+
+
+ 系统管理 -> 管理插件，检查是否已经安装 Maven Integration plugin 和 Deploy to container Plugin，
+若没有安装则需要安装这两个插件  #直接搜索 Maven Integration （构建maven项目）和  Deploy to container（远程发布）  即可
+ 安装完插件后，需要重启jenkins
+ systemctl restart jenkins
+ 创建新任务
+ 登录jenkins，点击“新建”，任务名称自定义（我的叫做java-test）
+ 选择“构建一个maven项目”
+ 点击“确定”
+
+
+
+
+
+ 源码管理
+         git@gitee.com:hcbabab/test-java.git
+ 选择 “git”,
+ Repository URL填写你的git地址，
+
+配置 git  账号 （私有库配置）
+类型 选  SSH Username with private key  
+Username    git
+Private Key	 填写自己jenkins服务器上的私钥    id_rsa
+
+ 并配置对应的key，
+ 大家最好事前先在jenkins这台机器上能够直接远程git操作私有仓库
+ 构建触发器、构建环境、Pre Steps保持默认
+ Build
+“Root POM”为pom.xml, Goals and options 填写 clean install -D maven.test.skip=true   #额外选项
+ Post Steps、构建设置保持默认
+
+ 构建后操作
+
+ 点击“增加构建后操作步骤”
+ 选择“Deploy war/ear to a container”,
+ “WAR/EAR files”填写“**/*.war”,
+  Contex path留空，
+  Containers选择Tomcat 8.x，  #根据直接的环境版本定
+  Tomcat URL填写要把war包发布到的那台机器的url，如http://172.7.15.114:8080
+  Credentials这里需要点击右侧的Add，添加用户名和密码
+
+ 继续点击“增加构建后操作步骤”选择“Editable Email Notification”
+ Project Recipient List，改为$DEFAULT_RECIPIENTS，aming_test@163.com, 意思是增加额外一个收件人
+ 点击右下角的“Advanced settings”,定位到“Triggers”，然后点击下方的“Add Trigger”，可以增加发邮件的条件。
+ 最后点左下角的“保存”
+ 之后就可以点左侧的“立即构建”，然后查看对应任务的“Console Output”
+
+
+
+总结
+
+手动在jenkins 上安装   jdk1.8    使用 java -version  证明安装正常
+
+插件很重要  记得要安装 
+Maven Integration （构建maven项目）和  Deploy to container（远程发布）
+Git plugin   （默认安装好了 git 工具）  和  Publish Over SSH  （远程登录，需要配置私钥）
+ 
+全局工具配置里  需要定义好 maven 目录  和 jdk 目录  手动安装 maven和jdk   使用 java -version  证明安装正常
+关键账号需要配置完成    pull git 的 和 Tomcat 的manger 账号
+email 配置  任何操作都发邮件 
+构建后操作   需要选择“Deploy war/ear to a container”
+配置如下
+“WAR/EAR files” 填写    **/*.war
+  Contex path    留空
+  Containers    选择Tomcat 8.x，  #根据自己服务器Tomcat的环境版本选定
+  Tomcat URL   填写要把war包发布到的那台机器的url，如http://172.7.15.114:8080
+  Credentials    这里需要点击右侧的Add，添加用户名和密码 。即Tomcat 的manger 账号 admin / 359171106
+
+
+
+回滚版本
+git 里面  回滚到上个版本
+再拉取，再发布，就OK
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

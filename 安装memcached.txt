@@ -1,0 +1,184 @@
+memcached 安装
+1. yum -y install memcached libmemcached libevent
+2. systemctl start memcached
+3. vim /etc/sysconfig/memcached 进行配置
+4. 比如加上监听的IP，可以吧OPTIONS="" 改成 OPTIONS="127.0.0.1"
+5.  -m 指定memcached分配内存
+6.  -c 指定最大并发数
+7.  -u 指定运行memcached服务的用户
+8.  -l 指定监听IP
+9.  -d 后台启动
+
+配置
+1. 命令行自定义启动，带自己需要的参数即可
+2. vim /etc/sysconfig/memcached 进行配置
+
+
+
+
+查看memcached运行状态
+1.memcached-tool 127.0.0.1:11211 stats
+
+2.echo stats | nc 127.0.0.1 112211 
+ #需要安装nc工具 - yum -y install nc
+
+3.若安装libmemcached后，可以使用命令
+memstat --servers=127.0.0.1:11211 查看memcached的服务状态
+
+主要关注
+curr_items  缓存的项目有多少，    即是当前存储的数据
+
+
+get_hits    表示get的总命中次数 ，即是一个历史数据
+cmd_get     表示总的get次数
+
+命中率 = get_hits / cmd_get
+
+取值进行运算命中率
+memstat --servers=127.0.0.1:11211 |grep -E 'get_hits:|curr_items:'| awk -F ":" '{print $2}'
+
+
+
+memcached命令行
+使用的是telnet 工具去连接
+telnet 127.0.0.1 11211
+
+设置值 用set
+set key2 0 30 2
+
+可以delete key2
+
+语法
+<command name> <key> <flags> <exptime> <bytes> ‘回车’
+<data block>
+
+<command name> 可以是 set , add ,replace
+
+set
+表示按照相应的<key>存储该数据，没有的时候增加，有的时候覆盖
+
+add
+表示按照相应的<key>添加该数据，但是如果该<key>已存在则会操作失败
+
+replace
+表示按照相应的<key>替换数据，但是如果该<key>不存在则操作失败
+
+<key>客户端需要保存数据的key 键
+
+<flags>是一个16位的无符号的整数（以十进制的方式表示）
+该标志将和需要存储的数据一起存储，并在客户端get数据时返回
+客户端可以将此标志用做特殊用途，此标记对服务器来说是 不透明的。
+
+<exptime>为过期的时间
+若为0 表示存储的数据永远不过期（但可以被服务器算法：LRU等替换）
+如果非0（Unix时间或者距离此时的秒数）当过期后，服务器可以保证用户得不到该数据（以服务器时间为标准）
+
+<bytes>需要存储的字节数，当用户希望存储空数据时<bytes>可以为0  即为VALUE 值
+
+<data block>需要存储的内容，输入完成后，最后客户端需要加上 ‘回车’作为结束标志
+
+
+
+
+memcached 数据导出和导入
+导出:memcached-tool
+memcached-tool 127.0.0.1:11211 dump > data.txt
+cat data.txt
+
+导入:nc 
+nc 127.0.0.1 11211 < data.txt
+#若nc命令不存在，yum install -y nc
+
+注意：
+导出的数据是带有一个时间戳的，这个时间戳就是该条数据过期的时间点，如果当前时间已经超过该时间戳，那么是导入不进去的
+
+查看时间戳 date -d @时间戳 
+
+增加一个小时的时间戳  date -d "+1 hour" +%s
+
+
+
+
+PHP连接Memcached
+1.先安装php 的memcached 扩展
+2. cd /usr/local/src/
+3. wget http://www.apelearn.com/bbs/data/attachment/forum/memcache-2.2.3.tgz
+4. tar zxf memcache-2.2.3.tgz
+5. cd memcache-2.2.3
+6. /usr/local/php-fpm/bin/phpize
+7. ./configure --with-php-config=/usr/local/php-fpm/bin/php-config
+8. make && make install
+
+安装完后会有类似这样的提示:
+Installing shared extensions: /usr/local/php-fpm/lib/php/extensions/no-debug-non-zts-20131226/
+然后修改php.ini添加一行 extension="memcache.so"
+
+检查  /usr/local/php/bin/php-fpm -m
+
+
+phpize的作用可以这样理解：
+侦测环境(phpize工具是在php安装目录下,基于这点phpize对应了当时的php环境，所以是要根据该php的配置情况生成对应的configure文件)，建立一个configure文件。必须在一个目录下去运行phpize。那么phpize就知道你的的环境是哪个目录，并且configure文件建立在该目录下。
+
+下载测试脚本 
+curl www.apelearn.com/study_v2/.memcache.txt > 1.php 
+1.php内容也可以参考https://coding.net/u/aminglinux/p/yuanke_centos7/git/blob/master/21NOSQL/1.php
+执行脚本
+/usr/local/php-fpm/bin/php 1.php
+
+或者将1.php放到某个虚拟主机根目录下面，在浏览器访问，即可看到效果
+最终可以看到数据如下：
+ [0] => aaa
+ [1] => bbb
+ [2] => ccc
+ [3] => ddd
+即为成功
+
+
+
+
+
+memcached 中存储 session
+1. 本实例再 lamp/lnmp 环境下实现
+2  编辑php.ini 添加两行 
+
+vim /usr/local/php-fpm/etc/php.ini
+需要注释掉 
+;session.save_handler = files    #这是将session 保存在本地 /tmp 目录里
+
+session.save_handler = memcache
+session.save_path = "tcp://localhost:11211"
+
+ Apache
+httpd.conf中对应的虚拟主机中添加
+php_value session.save_handler "memcache"
+php_value session.save_path "tcp://localhost:11211"
+
+nginx 的php-fpm.conf对应的pool中添加
+php_value[session.save_handler] = memcache
+php_value[session.save_path] = "tcp://localhost:11211 "
+
+
+wget http://study.lishiming.net/.mem_se.txt
+mv .mem_se.txt  /usr/local/apache2/htdocs/session.php
+
+其中session.php内容可以参考https://coding.net/u/aminglinux/p/yuanke_centos7/git/blob/master/21NOSQL/session.php
+
+curl localhost/session.php 
+类似于1443702394<br><br>1443702394<br><br>i44nunao0g3o7vf2su0hnc5440
+telnet 127.0.0.1 11211
+get i44nunao0g3o7vf2su0hnc5440 
+ 有正确输出即为正确
+
+
+
+
+
+
+
+
+
+
+
+
+
+

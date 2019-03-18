@@ -1,0 +1,667 @@
+ELK
+
+ 业务发展越来越庞大，服务器越来越多
+ 各种访问日志、应用日志、错误日志量越来越多
+ 开发人员排查问题，需要到服务器上查日志，不方便
+ 运营人员需要一些数据，需要我们运维到服务器上分析日志
+
+
+
+
+
+
+ELK介绍
+
+官网https://www.elastic.co/cn/
+ 中文指南https://www.gitbook.com/book/chenryn/elk-stack-guide-cn/details
+ ELK Stack （5.0版本之后） Elastic Stack == （ELK Stack + Beats）
+ ELK Stack包含：ElasticSearch、Logstash、Kibana
+ ElasticSearch是一个搜索引擎，用来搜索、分析、存储日志。它是分布式的，也就是说可以横向扩容，可以自动发现，索引自动分片，总之很强大。文档https://www.elastic.co/guide/cn/elasticsearch/guide/current/index.html
+ Logstash用来采集日志，把日志解析为json格式交给ElasticSearch。
+ Kibana是一个数据可视化组件，把处理后的结果通过web界面展示
+ Beats在这里是一个轻量级日志采集器，其实Beats家族有5个成员
+ 早期的ELK架构中使用Logstash收集、解析日志，但是Logstash对内存、cpu、io等资源消耗比较高。相比 Logstash，Beats所占系统的CPU和内存几乎可以忽略不计
+ x-pack对Elastic Stack提供了安全、警报、监控、报表、图表于一身的扩展包，是收费的
+
+
+
+
+
+
+
+ELK安装 – 准备工作
+
+
+ 准备3台机器 9, 10, 11
+ 角色划分：
+ 3台全部安装elasticsearch(后续简称es) ，
+  1个 主节点    9,
+  2个 数据节点  10,11
+ es主 9 上安装 kibana    （浏览器上访问）
+ 1台es数据节点 ，11 上安装logstash 
+ 3台机器全部安装jdk8（openjdk即可）
+ yum install -y java-1.8.0-openjdk
+
+
+
+
+
+
+
+
+
+
+
+install es
+
+官方文档 https://www.elastic.co/guide/en/elastic-stack/current/installing-elastic-stack.html
+ 以下操作3台机器上都要执行
+ rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+ vim /etc/yum.repos.d/elastic.repo //加入如下内容
+[elasticsearch-6.x]
+name=Elasticsearch repository for 6.x packages
+baseurl=https://artifacts.elastic.co/packages/6.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+
+ yum install -y elasticsearch //也可以直接下载rpm文件，然后安装
+
+RPM包下载地址：
+ wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-6.0.0.rpm
+
+
+
+
+
+
+ELK安装 – 配置es
+ elasticsearch配置文件/etc/elasticsearch和/etc/sysconfig/elasticsearch 
+
+/etc/elasticsearch/elasticsearch.yml    #节点相关的配置文件
+/etc/sysconfig/elasticsearch            #服务本身相关配置文件
+ 参考https://www.elastic.co/guide/en/elasticsearch/reference/6.0/rpm.html 
+ 在130上编辑配置文件vi /etc/elasticsearch/elasticsearch.yml//增加或更改
+
+ cluster.name: hc     #名称
+ node.name: huidou02
+ node.master: true     #意思是该节点为主节点   true 
+ node.data: false      # 不是数据节点  false  
+ network.host: 192.168.1.9   #绑定IP 监听port  为了安全最好只监听内网
+ discovery.zen.ping.unicast.hosts: ["192.168.1.9", "192.168.1.10", "192.168.1.11"] #集群成员，可以是主机名，前提要定义hosts
+
+ 在10和11上同样编辑配置文件vi /etc/elasticsearch/elasticsearch.yml//增加或更改
+ cluster.name: hc
+ node.master: false
+ node.data: true
+ network.host: 0.0.0.0
+ discovery.zen.ping.unicast.hosts: ["192.168.1.9", "192.168.1.10", "192.168.1.11"]
+
+service elasticsearch start
+
+
+
+
+启动日志
+/var/log/elasticsearch/      # 服务相关日志
+/var/log/messages         #系统总日志
+
+*********************************************************************************
+关于报错问题：
+
+[2] bootstrap checks failed
+[1]: max number of threads [1024] for user [elasticsearch] is too low, increase to at least [4096]
+[2]: system call filters failed to install; check the logs and fix your configuration or disable system call filters at your own risk
+
+
+
+[1]: max number of threads [1024] for user [elasticsearch] is too low, increase to at least [4096]
+用户[elasticsearch]的 最大线程数 [1024]过低，增加到至少[4096]
+
+解决：切换到root用户，进入limits.d目录下修改配置文件。
+
+vim /etc/security/limits.d/90-nproc.conf 
+
+修改如下内容：
+* soft nproc 1024
+
+#修改为：
+* soft nproc 4069
+ 
+vim /etc/sysctl.conf
+#添加 elasticsearch 设置值
+vm.max_map_count = 4096
+
+
+
+[1]: max file descriptors [4069] for elasticsearch process is too low, increase to at least [65536]
+[1]:对于elasticsearch 进程 的最大文件描述符[4069]过低，增加到至少[65536]
+
+修改
+vim /etc/security/limits.conf
+*               soft    nproc           4096
+*               hard    nproc           4096
+
+
+
+[2]: system call filters failed to install; check the logs and fix your configuration or disable system call filters at your own risk
+原因：
+这是在因为Centos6不支持SecComp，而ES5.2.0默认bootstrap.system_call_filter为true进行检测，所以导致检测失败，失败后直接导致ES不能启动。
+
+解决：
+在elasticsearch.yml中配置bootstrap.system_call_filter为false，注意要在Memory下面:
+
+bootstrap.memory_lock: false
+bootstrap.system_call_filter: false
+
+
+vim /etc/sysctl.conf
+#添加 elasticsearch 设置值
+vm.max_map_count = 4096
+
+#刷新命令
+sysctl -p
+
+#####
+后台运行
+#####
+最后还有一个小问题，如果你在服务器上安装Elasticsearch，而你想在本地机器上进行开发，这时候，你很可能需要在关闭终端的时候，让Elasticsearch继续保持运行。最简单的方法就是使用nohup。先按Ctrl + C，停止当前运行的Elasticsearch，改用下面的命令运行Elasticsearch
+
+nohup./bin/elasticsearch &
+
+这样，你就可以放心地关闭服务器终端，而不用担心Elasticsearch也跟着关闭了。
+
+***********************************************************************************
+
+
+
+
+
+
+
+
+ELK安装 – 安装x-pack（可省略）
+
+ 3台机器上都要执行
+ cd /usr/share/elasticsearch/bin/ （可省略）
+ ./elasticsearch-plugin install x-pack //如果速度慢，就下载x-pack压缩包（可省略）
+ cd /tmp/; wget https://artifacts.elastic.co/downloads/packs/x-pack/x-pack-6.0.0.zip （可省略）
+ ./elasticsearch-plugin install  file:///tmp/x-pack-6.0.0.zip （可省略）
+ 启动elasticsearch服务
+ systemctl enable elasticsearch.service
+ systemctl start elasticsearch.service
+ 以下操作只需要在130上执行
+ 安装x-pack后就可以为内置用户设置密码了，如下
+ /usr/share/elasticsearch/bin/x-pack/setup-passwords interactive （可省略）
+ curl localhost:9200 -u elastic //输入密码，可以查看到输出信息（可省略）
+
+
+
+
+
+
+
+ELK安装 – curl查看es
+主节点   192.168.1.9 上执行 
+ curl '192.168.1.9:9200/_cluster/health?pretty'   # 健康检查
+ curl '192.168.1.9:9200/_cluster/state?pretty'    # 集群详细信息
+
+ 参考 http://zhaoyanblog.com/archives/732.html
+
+
+[root@huidou02 ~]# curl '192.168.1.9:9200/_cluster/health?pretty'
+{
+  "cluster_name" : "hc",     #名称
+  "status" : "green",          #grenn 绿色为正常，   有 red   有yellow 都是有问题的
+  "timed_out" : false,        #没有超时
+  "number_of_nodes" : 3,       #一共3个节点
+  "number_of_data_nodes" : 2,   # 有两个数据节点
+  "active_primary_shards" : 0,
+  "active_shards" : 0,
+  "relocating_shards" : 0,
+  "initializing_shards" : 0,
+  "unassigned_shards" : 0,
+  "delayed_unassigned_shards" : 0,
+  "number_of_pending_tasks" : 0,
+  "number_of_in_flight_fetch" : 0,
+  "task_max_waiting_in_queue_millis" : 0,
+  "active_shards_percent_as_number" : 100.0
+}
+
+
+
+
+
+
+
+
+
+ELK安装 – 安装kibana
+ 以下在130上执行
+ 前面已经配置过yum源，这里就不用再配置了
+ yum install -y kibana 
+ 若速度太慢，可以直接下载rpm包
+ wget https://artifacts.elastic.co/downloads/kibana/kibana-6.0.0-x86_64.rpm
+
+ rpm -ivh kibana-6.0.0-x86_64.rpm
+
+x-pack（可省略）    因为是收费的
+ kibana同样也需要安装x-pack（可省略）
+ 安装方法同elasticsearch的x-pack
+ cd /usr/share/kibana/bin （可省略）
+ ./kibana-plugin install x-pack //如果这样安装比较慢，也可以下载zip文件（可省略）
+ wget https://artifacts.elastic.co/downloads/packs/x-pack/x-pack-6.0.0.zip//这个文件和前面下载的那个其实是一个（可省略）
+ ./kibana-plugin install file:///tmp/x-pack-6.0.0.zip （可省略）
+
+
+
+
+配置
+ kibana 就是 jenkins zabbix jumpserver 等等工具的 图形界面
+ kibana  nodejs 开发的
+ 以下在主节点上 192.168.1.9上执行
+ vim /etc/kibana/kibana.conf //增加
+server.host: 192.168.1.9      #监听内网， 如果用公网，需要在前面加一层nginx 代理  和认证
+elasticsearch.url: "http://192.168.1.9:9200" 
+logging.dest: /var/log/kibana.log
+
+ touch /var/log/kibana.log; chmod 777 /var/log/kibana.log
+service kibana start
+
+如果没有定义指定位置的日志   则会在 /var/log/messages  内
+
+ 浏览器里访问http://192.168.1.9:5601/ 
+###
+ 用户名elastic，密码为之前你设置过的密码（如果未安装x-pack，不需要用户名密码）
+ 若无法输入用户名密码，查日志/var/log/kibana.log
+ 出现错误  Status changed from uninitialized to red - Elasticsearch is still initializing the kibana index.
+ 解决办法：curl -XDELETE http://192.168.133.130:9200/.kibana -uelastic
+
+
+
+
+
+
+
+
+ELK安装 – 安装logstash
+
+
+ 以下在数据节点上   192.168.1.10 上执行
+ logstash目前不支持java9
+ 直接yum安装（配置源同前面es的源）
+ yum install -y  logstash //如果慢，就下载rpm包
+ wget https://artifacts.elastic.co/downloads/logstash/logstash-6.0.0.rpm
+ cd /usr/share/logstash/bin/（可省略）
+ ./logstash-plugin  install file:///tmp/x-pack-6.0.0.zip （可省略）
+ systemctl enable logstash
+ systemctl start logstash
+
+
+
+ logstash需要先安装java8，目前不支持java9
+ 直接yum安装
+ yum install -y  logstash //如果慢，就下载rpm包
+ wget https://artifacts.elastic.co/downloads/logstash/logstash-6.0.0.rpm
+ rpm -ivh logstash-6.0.0.rpm
+
+ logstash也需要安装x-pack（可省略）
+ cd /usr/share/logstash/bin/ （可省略）
+ ./logstash-plugin  install file:///tmp/x-pack-6.0.0.zip （可省略）
+
+
+
+
+
+ 以下在132上操作
+ 编辑配置文件 vi /etc/logstash/conf.d/syslog.conf//加入如下内容
+input {                       #日志源 
+  syslog {
+    type => "system-syslog"     #定义类型，也可以定义文件
+    port => 10514                 # 定义端口
+  }
+}
+output {                       #输出到哪里去
+  stdout {
+    codec => rubydebug    # 会输到当前执行命令窗口去
+  }
+}
+
+ 检测配置文件是否有错
+ cd /usr/share/logstash/bin
+ /usr/share/logstash/bin/logstash --path.settings /etc/logstash/ -f /etc/logstash/conf.d/syslog.conf --config.test_and_exit
+   --path.settings /etc/logstash/    #指定配置文件路径
+   -f /etc/logstash/conf.d/syslog.conf  ##指定配置文件
+   --config.test_and_exit           ##测试正常然后退出
+
+
+
+ 以下在数据节点上 10 上操作
+ 前台形式启动logstash
+ ./logstash --path.settings /etc/logstash/ -f /etc/logstash/conf.d/syslog.conf//这样可以在屏幕上查看到日志输出，不能敲命令
+ 再开一个终端
+ 检测是否开启10514端口：netstat -lnp |grep 10514
+ vim /etc/rsyslog.conf      //在#### RULES下面增加一行
+ *.* @@127.0.0.1:10514     ##监听本机
+ systemctl restart rsyslog   #启动系统日志记录器
+
+ 从130ssh到132上，可以在logstash前台的终端上看到ssh登录的相关日志
+
+ 结束logstash，在前台的那个终端上按ctrl c  还有 停止： service rsyslog stop
+
+
+************************************************************************
+
+# 所有节点上都要启动elasticsearch ，只有主节点上启动 kibana （成图页面显示用的）
+
+##所有数据节点上， 先启动rsyslog 再开启logstash 才会有记录!    （logstash 很占用cpu）    
+
+###rsyslog 配置上放开端口和监听本机‘ *.* @@内网IP:port ’
+
+###再配置logstash， /etc/logstash/conf.d/syslog.conf 配置文件，检测并启动
+
+*************************************************************************
+
+
+
+logstash收集syslog日志
+
+ 以下在数据节点上  10 上操作
+ 后台形式启动logstash
+ 编辑配置文件 vi /etc/logstash/conf.d/syslog.conf//配置文件内容改为如下
+input {
+  syslog {      #自定义
+    type => "system-syslog"      #自定义类型
+    port => 10514                #开放端口
+  }
+}
+output {
+  elasticsearch {
+    hosts => ["192.168.1.9:9200"]          #传输给主节点
+    index => "system-syslog-%{+YYYY.MM}"   #定义索引
+  }
+}
+ systemctl start logstash //启动需要一些时间，启动完成后，可以看到9600端口和10514端口已被监听
+
+
+## logstash日志记录在  /var/log/logstash/logstash-plain.log 
+
+ vim /etc/logstash/logstash.yml  这是logstash 的配置文件
+
+ http.host: "127.0.0.1"  需要打开  变更节点
+
+chown logstash /var/log/logstash/logstash-plain.log   #权限问题
+
+
+
+logstash收集syslog日志
+
+ 主节点上 09 上执行curl '192.168.1.9:9200/_cat/indices?v'   ##可以获取索引信息
+ curl -XGET '192.168.1.9:9200/indexname?pretty'    ## 可以获指定索引详细信息
+ curl -XDELETE '192.168.1.9:9200/logstash-xxx-*'    ##可以删除指定索引
+
+ 浏览器访问192.168.1.9:5601，到kibana配置索引
+ 左侧点击“Managerment”-> “Index Patterns”-> “Create Index Pattern”
+ Index pattern这里需要根据前面curl查询到的索引名字来写，否则下面的按钮是无法点击的
+
+
+
+
+
+
+
+
+
+
+logstash收集nginx日志
+
+ 数据节点 10 上 编辑配置文件
+ vi /etc/logstash/conf.d/nginx.conf//加入如下内容
+input {
+  file {                       #定位监听文件
+    path => "/tmp/elk_access.log"   #定义文件路径，
+    start_position => "beginning"   #定义开始位置， beginning ，从头
+    type => "nginx"              #自定义类型
+  }
+}
+filter {                          #对日志格式进行过滤，这里的格式定义了，nginx的日志格式也要定义
+    grok {
+        match => { "message" => "%{IPORHOST:http_host} %{IPORHOST:clientip} - %{USERNAME:remote_user} \[%{HTTPDATE:timestamp}\] \"(?:%{WORD:http_verb} %{NOTSPACE:http_request}(?: HTTP/%{NUMBER:http_version})?|%{DATA:raw_http_request})\" %{NUMBER:response} (?:%{NUMBER:bytes_read}|-) %{QS:referrer} %{QS:agent} %{QS:xforwardedfor} %{NUMBER:request_time:float}"}
+    }
+    geoip {
+        source => "clientip"
+    }
+}
+output {
+    stdout { codec => rubydebug }
+    elasticsearch {
+        hosts => ["192.168.1.10:9200"]       #因为监听了本地的文件 ，所以这里也要监听本机
+	index => "nginx-log-%{+YYYY.MM.dd}"
+  }
+}
+
+
+
+
+
+
+
+
+ 以下在数据节点 10上操作
+ 检测配置文件是否有错
+ cd /usr/share/logstash/bin
+ ./logstash --path.settings /etc/logstash/ -f /etc/logstash/conf.d/nginx.conf --config.test_and_exit
+
+ yum install -y nginx
+
+ vi /etc/nginx/conf.d/elk.conf         //写入如下内容,做个代理
+ server {
+            listen 80;
+            server_name localhost;
+            location / {
+                proxy_pass http://192.168.1.9:5601;
+                proxy_set_header Host  $host;
+                proxy_set_header X-Real-IP  $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+            access_log  /tmp/elk_access.log main2;   #这里用到的是main2 自定义的日志格式
+        }
+
+
+
+
+
+
+ 以下在数据节点上 10上操作
+ vim /etc/nginx/nginx.conf   #增加如下内容    日志格式，和上面的日志格式要一致
+log_format main2 '$http_host $remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$upstream_addr" $request_time';
+
+ nginx -t
+   service nginx restart
+
+ 浏览器访问，检查是否有日志产生
+ systemctl restart logstash 
+
+
+
+在kibana 上显示
+主节点上   curl '192.168.1.9:9200/_cat/indices?v' 
+ 检查是否有nginx-test开头的索引生成 
+ 如果有，才能到kibana里去配置该索引
+ 左侧点击“Managerment”-> “Index Patterns”-> “Create Index Pattern”
+ Index pattern这里写nginx-test-*
+ 之后点击左侧的Discover
+
+
+
+
+************************************************************************
+
+# 所有节点上都要启动elasticsearch ，只有主节点上启动 kibana （成图页面显示用的）
+
+##所有数据节点上， 先启动rsyslog 再开启logstash 才会有记录!    （logstash 很占用cpu）    
+
+###rsyslog 配置上放开端口和监听本机‘ *.* @@内网IP:port ’
+
+###再配置logstash， /etc/logstash/conf.d/nginx.conf 配置文件，监听本地文件，和本地es端口
+
+#### 检查语法是否正常 
+ /etc/logstash/conf.d/nginx.conf --path.settings /etc/logstash -f /etc/logstash/conf.d/nginx.conf --config.test_and_exit
+
+#####安装nginx 配置成为代理，然后再配置日志格式, restrat nginx,logstash
+
+######kibana 上找一下索引就OK
+
+*************************************************************************
+
+
+
+
+
+
+
+
+
+
+
+使用Beats采集日志
+
+ https://www.elastic.co/cn/products/beats
+ filebeat metricbeat packetbeat winlogbeat auditbeat  heartbeat
+ 可扩展，支持自定义构建
+ 在133上执行
+ wget https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-6.0.0-x86_64.rpm
+ rpm -ivh  filebeat-6.0.0-x86_64.rpm
+ 首先编辑配置文件
+ vim /etc/filebeat/filebeat.yml //增加或者更改
+filebeat.prospectors:
+- type: log    #类型
+ #enable: true    #打开功能
+   paths:         #路径
+      - /var/log/messages   #监听的文件日志
+output.console:      #显示在当前终端 console
+  enable: true       #打开功能
+ /usr/share/filebeat/bin/filebeat -c /etc/filebeat/filebeat.yml #启动filebeat//可以在屏幕上看到对应的日志信息
+
+
+
+
+
+
+
+ 再编辑配置文件
+ vim /etc/filebeat/filebeat.yml //增加或者更改
+filebeat.prospectors:
+- input_type: log 
+  paths:
+    - /var/log/messages
+output.elasticsearch:                   #传输给主节点
+  hosts: ["192.168.133.130:9200"]       #用IP去连接主节点
+
+ systemctl start  filebeat  、    service filebeat start
+
+
+
+
+
+
+
+
+
+扩展部分
+
+ x-pack 收费，免费 http://www.jianshu.com/p/a49d93212eca
+
+ https://www.elastic.co/subscriptions
+
+ Elastic stack演进  http://70data.net/1505.html
+
+ 基于kafka和elasticsearch，linkedin构建实时日志分析系统 http://t.cn/RYffDoE
+
+ 使用redis http://blog.lishiming.net/?p=463
+
+ ELK+Filebeat+Kafka+ZooKeeper 构建海量日志分析平台  https://www.cnblogs.com/delgyd/p/elk.html
+
+ http://www.jianshu.com/p/d65aed756587
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

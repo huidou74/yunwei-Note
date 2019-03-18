@@ -1,0 +1,278 @@
+堡垒机介绍
+
+ 在一个特定网络环境下，为了保障网络和数据不受外界入侵和破坏，而运用各种技术手段实时收集和监控网络环境中每一个组成部分的系统状态、安全事件、网络活动，以便集中报警、及时处理及审计定责。
+ 我们又把堡垒机叫做跳板机，简易的跳板机功能简单，主要核心功能是远程登录服务器和日志审计。
+ 比较优秀的开源软件jumpserver，认证、授权、审计、自动化、资产管理。
+ 商业堡垒机：齐治, Citrix XenApp 
+
+
+
+
+
+
+搭建简易堡垒机
+
+ 具备堡垒机的条件是，该机器有公司和私网，其中私网和机房其他机器互通
+ 设计堡垒机思路
+ 跳板机安全设置（iptables端口限制、登录限制sshd_config)
+ 用户、命令权限限制（jailkit) http://blog.chinaunix.net/uid-28310119-id-3503318.html
+ 客户机器日志审计
+ http://www.68idc.cn/help/server/linux/2014042190951.html
+
+
+
+
+
+搭建简易堡垒机 – jailkit chroot
+
+1. wget https://olivier.sessink.nl/jailkit/jailkit-2.19.tar.bz2
+2. tar jxvf jailkit-2.19.tar.bz2
+3. cd jailkit-2.19
+4. ./configure && make && make install
+5. mkdir /home/jail      #虚拟系统根目录
+6. jk_init -v -j /home/jail/ basicshell   #把shell 相关的
+7. jk_init -v -j /home/jail/ editors     # 编译器相关的  vi, vim 
+8. jk_init -v -j /home/jail/ netutils    # 网络相关的
+9. jk_init -v -j /home/jail/ ssh     #远程登录用到的命令
+10. mkdir /home/jail/usr/sbin          #创建多个用户时，只需要运行一次这条命令
+11. cp /usr/sbin/jk_lsh /home/jail/usr/sbin/jk_lsh   #虚拟shell 的home
+12. useradd zhangsan    #创建系统用户
+13. passwd zhangsan     #密码
+14. jk_jailuser -m -j /home/jail zhangsan    #虚拟系统内的用户
+15. vim /home/jail/etc/passwd   // 把zhangsan那一行的/usr/sbin/jk_lsh改为/bin/bash 
+
+# 设置 iptables 规则  ，  秘钥登录  ，  设置  /etc/host.allow  , host.deny
+
+
+
+
+
+搭建简易堡垒机 – 日志审计
+
+ 以下操作是需要在所有被登录机器上做的
+ mkdir /usr/local/records
+ chmod 777 !$
+ chmod +t !$     #防删除
+ vi /etc/profile //添加
+ if [ ! -d  /usr/local/records/${LOGNAME} ]     #显示登录用户名
+then
+mkdir -p /usr/local/records/${LOGNAME}
+chmod 300 /usr/local/records/${LOGNAME}
+fi
+export HISTORY_FILE="/usr/local/records/${LOGNAME}/bash_history"    #记录命令文件
+export PROMPT_COMMAND='{ date "+%Y-%m-%d %T #### $(who am i |awk "{print \$1\" \"\$2\" \"\$5}") #### $(history 1 | { read x cmd; echo "$cmd"; })"; } >>$HISTORY_FILE'
+
+### 写入文件并保存
+
+
+
+
+
+
+
+
+
+开源堡垒机jumpserver介绍
+
+ 官网www.jumpserver.org
+ Jumpserver是一款使用Python, Django开发的开源跳板机系统, 助力互联网企业高效 用户、资产、权限、审计 管理
+ Auth 统一认证
+ CMDB 资产管理
+ 统一授权
+ 日志审计
+ 自动化运维（ansible）
+ 最新版v0.4.0，基于python3.6， django 1.11，目前还未开发完成，所以我们接下来将要安装v0.3.2
+
+
+
+
+
+
+
+Jumpserver安装  (0.4.0)
+
+1. yum install -y docker    #首先安装docker
+2. systemctl enable docker
+3. systemctl start docker    #启动docker服务   yum -y install docker-io    Centos 6
+4. curl -L https://github.com/docker/compose/releases/download/1.17.0-rc1/docker-compose-`uname -s`-`uname -m` > /usr/local/bin/docker-compose     #安装docker-compose，
+5. chmod 755 /usr/local/bin/docker-compose
+6. git clone https://github.com/jumpserver/jumpserver.git  ##下载jumpserver源码
+7. cd jumpserver
+8. 配置docker加速器 http://ask.apelearn.com/question/15126
+    然后vi  /etc/sysconfig/docker
+
+    最下面增加一行: other_args="--registry-mirror=https://olxmv577.mirror.aliyuncs.com"
+
+    如果是centos7， 需要修改OPTIONS那一行，在最后面加上"--registry-mirror=https://olxmv577.mirror.aliyuncs.com"
+
+    我的内容是这样的：
+
+    OPTIONS='--selinux-enabled --log-driver=journald --signature-verification=false --registry-mirror=https://olxmv577.mirror.aliyuncs.co
+    然后就是重启一下docker就ok了
+
+
+
+9. 检查是否有监听8080端口的服务，如果有关闭
+10. screen            #进入到一个虚拟终端
+11.  docker-compose up  #使用docker-compose安装jumpserver
+
+
+
+
+
+
+Jumpserver安装(0.3.2)
+
+ 官方文档https://github.com/jumpserver/jumpserver/wiki/v0.3.2-%E5%9F%BA%E4%BA%8E-RedHat-%E7%9A%84%E7%B3%BB%E7%BB%9F
+ yum install -y git
+ cd /home //要到一个空间大的目录下面
+ git clone https://github.com/jumpserver/jumpserver.git
+ git checkout master    #改变分支，从dev 开发0.4版本 变更到master 0.3版本分支下，
+ cd jumpserver/install 
+ python install.py 
+ 若你的机器已经安装过mysql，可以先创建jumpserver库以及对应的用户名密码，若没有安装就让它自动安装即可
+ 安装过程中还需要设置一下使用的第三方邮件，建议你去申请一个免费的163邮箱
+ 163邮箱smtp.163.com 18123732386 l359171106
+   
+###http://docs.jumpserver.org/zh/docs/step_by_step.html   最新安装步骤
+
+  #需要在mysql 数据库内创建 数据库和登录用户
+ 1.  create database jumpserver ;
+ 2.  grant all on jumpserver.* to 'jumpserver'@'127.0.0.1' identified by '359171106';
+
+
+
+
+ssk-keygen -f 'keyname'    -f 指定名字  #创建公私钥
+
+
+
+
+
+
+Jumpserver里面的用户
+ jumpserver用户用来登录jumpserver（web界面、ssh登录）
+ 管理用户用来自动创建客户机上的系统用户、批量执行命令等操作
+ 客户机上的系统用户，用来通过jumpserver去登录每一台客户机的用户
+
+
+
+
+
+Jumpserver使用
+ 普通用户的密码以及密钥下载地址、密钥密码都会通过邮件的方式发送给用户
+ 浏览器登录普通用户，可以查看有权限的主机，也可以在web界面下登录主机、上传和下载文件
+ xshell创建新的连接
+ ip为jumpserver的ip，端口为22
+ 用户名为普通用户名字（aming）
+ 设置密钥认证
+ 连接后，出现登录页面，数据p查看所有被授权主机
+ 输入主机前面的数字可以登录到对应的主机下面
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
